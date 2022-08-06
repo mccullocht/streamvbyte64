@@ -1,8 +1,10 @@
+extern crate crunchy;
+extern crate num_traits;
+
+mod dist1234;
+mod dist1248;
+mod tag_utils;
+mod unsafe_group;
+
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}
+pub(crate) mod tests;
