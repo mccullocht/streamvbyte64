@@ -131,7 +131,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
             vld1q_u8(input),
             vld1q_u8(DECODE_TABLE[tag as usize].as_ptr()),
         ));
-        (Self::encoded_len(tag), UnsafeGroupImpl(v))
+        (Self::data_len(tag), UnsafeGroupImpl(v))
     }
 
     #[inline]
@@ -148,8 +148,8 @@ impl UnsafeGroup for UnsafeGroupImpl {
     }
 
     #[inline]
-    fn encoded_len(tag: u8) -> usize {
-        scalar::UnsafeGroupImpl::encoded_len(tag)
+    fn data_len(tag: u8) -> usize {
+        scalar::UnsafeGroupImpl::data_len(tag)
     }
 
     #[inline]
@@ -159,8 +159,8 @@ impl UnsafeGroup for UnsafeGroupImpl {
     }
 
     #[inline]
-    unsafe fn super_decode(input: *const u8, super_tag: u64, output: *mut Self::Elem) -> usize {
-        if super_tag == 0 {
+    unsafe fn decode8(input: *const u8, tag8: u64, output: *mut Self::Elem) -> usize {
+        if tag8 == 0 {
             // We can decode all 32 entries with 2 loads and 2 stores (plus a broadcast load).
             // vst4q_u8() interleaves 4 input vectors, so we can interleave one 16 byte input with 3 16x0 inputs
             // to produce 16 u32 values where only the low byte is set.
@@ -173,17 +173,17 @@ impl UnsafeGroup for UnsafeGroupImpl {
             }
             return 32;
         }
-        crate::unsafe_group::default_super_decode::<Self>(input, super_tag, output)
+        crate::unsafe_group::default_decode8::<Self>(input, tag8, output)
     }
 
     #[inline]
-    unsafe fn super_decode_deltas(
+    unsafe fn decode_deltas8(
         input: *const u8,
-        super_tag: u64,
+        tag8: u64,
         base: Self,
         output: *mut Self::Elem,
     ) -> (usize, Self) {
-        if super_tag == 0 {
+        if tag8 == 0 {
             // NB: There might be a better implementation using vld4_u8() and vst4q_u32(), although it would
             // mostly reduce the load/store instructions.
             let z = vdupq_n_u16(0);
@@ -207,15 +207,14 @@ impl UnsafeGroup for UnsafeGroupImpl {
             }
             return (32, UnsafeGroupImpl(p));
         }
-        crate::unsafe_group::default_super_decode_deltas(input, super_tag, base, output)
+        crate::unsafe_group::default_decode_deltas8(input, tag8, base, output)
     }
 
     #[inline]
-    fn super_encoded_len(super_tag: u64) -> usize {
+    fn data_len8(tag8: u64) -> usize {
         unsafe {
-            // Load super_tag value so that we get a nibble in each of 16 8-bit lanes.
-            let mut nibble_tags =
-                vreinterpretq_u8_u64(vld1q_u64([super_tag, super_tag >> 4].as_ptr()));
+            // Load tag8 value so that we get a nibble in each of 16 8-bit lanes.
+            let mut nibble_tags = vreinterpretq_u8_u64(vld1q_u64([tag8, tag8 >> 4].as_ptr()));
             nibble_tags = vandq_u8(nibble_tags, vdupq_n_u8(0xf));
             let nibble_len = vqtbl1q_u8(vld1q_u8(NIBBLE_TAG_LEN.as_ptr()), nibble_tags);
             vaddlvq_u8(nibble_len) as usize
@@ -223,20 +222,20 @@ impl UnsafeGroup for UnsafeGroupImpl {
     }
 
     #[inline]
-    unsafe fn super_skip_deltas(input: *const u8, super_tag: u64) -> (usize, Self::Elem) {
-        if super_tag == 0 {
+    unsafe fn skip_deltas8(input: *const u8, tag8: u64) -> (usize, Self::Elem) {
+        if tag8 == 0 {
             // In this case the values are all single byte in the the 32 bytes from input, and we don't care
             // about the order so we can sum within the output vectors.
             let sg = vld2q_u8(input);
             let sum = vaddlvq_u8(sg.0) + vaddlvq_u8(sg.1);
             return (32, Self::Elem::from(sum));
         }
-        crate::unsafe_group::default_super_skip_deltas::<Self>(input, super_tag)
+        crate::unsafe_group::default_skip_deltas8::<Self>(input, tag8)
     }
 }
 
 #[cfg(test)]
-crate::tests::group_test_suite!();
+crate::tests::unsafe_group_test_suite!();
 
 #[cfg(test)]
 crate::tests::compat_test_suite!();
@@ -247,28 +246,27 @@ mod tests {
 
     use super::UnsafeGroupImpl;
 
-    // super_decode() on a group where every entry is 1 byte.
     #[test]
-    fn super_decode_1byte() {
-        // Input is 32 bytes (enumerate) with a super_tag of 0.
+    fn decode8_1byte() {
+        // Input is 32 bytes (enumerate) with a tag8 of 0.
         let input = std::iter::repeat(0)
             .take(32)
             .enumerate()
             .map(|(i, _)| i as u8)
             .collect::<Vec<_>>();
         let mut output = [0u32; 32];
-        let dlen = unsafe { UnsafeGroupImpl::super_decode(input.as_ptr(), 0, output.as_mut_ptr()) };
+        let dlen = unsafe { UnsafeGroupImpl::decode8(input.as_ptr(), 0, output.as_mut_ptr()) };
 
         assert_eq!(dlen, 32);
         assert_eq!(input.iter().map(|v| *v as u32).collect::<Vec<_>>(), output);
     }
 
     #[test]
-    fn super_decode_deltas_1byte() {
+    fn decode_deltas8_1byte() {
         let input = std::iter::repeat(1u8).take(32).collect::<Vec<_>>();
         let mut output = [0u32; 32];
         let (dlen, _) = unsafe {
-            UnsafeGroupImpl::super_decode_deltas(
+            UnsafeGroupImpl::decode_deltas8(
                 input.as_ptr(),
                 0,
                 UnsafeGroupImpl::set1(1),
@@ -285,16 +283,15 @@ mod tests {
         assert_eq!(expected, output);
     }
 
-    // super_skip_deltas() on a group where every entry is 1 byte.
     #[test]
-    fn super_skip_deltas_1byte() {
-        // Input is 32 bytes (enumerate) with a super_tag of 0.
+    fn skip_deltas8_1byte() {
+        // Input is 32 bytes (enumerate) with a tag8 of 0.
         let input = std::iter::repeat(0)
             .take(32)
             .enumerate()
             .map(|(i, _)| i as u8)
             .collect::<Vec<_>>();
-        let (dlen, sum) = unsafe { UnsafeGroupImpl::super_skip_deltas(input.as_ptr(), 0) };
+        let (dlen, sum) = unsafe { UnsafeGroupImpl::skip_deltas8(input.as_ptr(), 0) };
 
         assert_eq!(dlen, 32);
         assert_eq!(input.iter().map(|v| *v as u32).sum::<u32>(), sum);

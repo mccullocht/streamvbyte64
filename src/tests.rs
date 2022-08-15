@@ -22,7 +22,7 @@ where
     /// Tag value associated with the group.
     pub tag: u8,
     /// Length of the group when encoded.
-    pub encoded_len: usize,
+    pub data_len: usize,
 }
 
 /// Yields all possible tag values and a group that fits that tag profile.
@@ -104,7 +104,7 @@ where
         Some(TestGroup {
             group,
             tag,
-            encoded_len: vlens.into_iter().sum::<u8>() as usize,
+            data_len: vlens.into_iter().sum::<u8>() as usize,
         })
     }
 }
@@ -132,8 +132,8 @@ where
             let (etag, elen) = EGroup::encode(enc.as_mut_ptr(), egroup);
             assert_eq!(test.tag, etag);
             assert!(elen <= enc.len());
-            assert_eq!(test.encoded_len, elen);
-            assert_eq!(elen, EGroup::encoded_len(etag));
+            assert_eq!(test.data_len, elen);
+            assert_eq!(elen, EGroup::data_len(etag));
 
             let (dlen, dgroup) = DGroup::decode(enc.as_ptr(), test.tag);
             assert_eq!(elen, dlen);
@@ -174,9 +174,9 @@ where
             let mut enc = [255u8; 64];
             let (etag, elen) = EGroup::encode_deltas(enc.as_mut_ptr(), EGroup::set1(base), egroup);
             assert_eq!(test.tag, etag);
-            assert_eq!(test.encoded_len, elen);
+            assert_eq!(test.data_len, elen);
             assert!(elen <= enc.len());
-            assert_eq!(elen, EGroup::encoded_len(etag));
+            assert_eq!(elen, EGroup::data_len(etag));
 
             let (dlen, dgroup) =
                 DGroup::decode_deltas(enc.as_ptr(), test.tag, DGroup::set1(DGroup::Elem::one()));
@@ -211,21 +211,21 @@ where
 }
 
 // Test encoding with EGroup and decoding a superblock with DGroup.
-pub(crate) fn test_super_decode<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_decode8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
 where
     <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
             .collect::<Vec<_>>();
-        for super_group in test_groups.chunks_exact(8) {
-            let group_tags = super_group.iter().map(|tg| tg.tag).collect::<Vec<_>>();
-            let group_values = super_group
+        for group8 in test_groups.chunks_exact(8) {
+            let group_tags = group8.iter().map(|tg| tg.tag).collect::<Vec<_>>();
+            let group_values = group8
                 .iter()
                 .map(|tg| tg.group)
                 .flatten()
                 .collect::<Vec<_>>();
-            let expected_len = super_group.iter().map(|tg| tg.encoded_len).sum::<usize>();
+            let expected_len = group8.iter().map(|tg| tg.data_len).sum::<usize>();
 
             let mut enc = [0u8; 256];
             let mut etag = Vec::<u8>::with_capacity(8);
@@ -240,13 +240,13 @@ where
             assert_eq!(group_tags, etag);
             assert_eq!(expected_len, elen);
 
-            let mut super_tag_bytes = [0u8; 8];
-            super_tag_bytes.copy_from_slice(&etag);
-            let super_tag = u64::from_le_bytes(super_tag_bytes);
-            assert_eq!(elen, DGroup::super_encoded_len(super_tag));
+            let mut tag8_bytes = [0u8; 8];
+            tag8_bytes.copy_from_slice(&etag);
+            let tag8 = u64::from_le_bytes(tag8_bytes);
+            assert_eq!(elen, DGroup::data_len8(tag8));
 
             let mut actual = [DGroup::Elem::zero(); 32];
-            let dlen = DGroup::super_decode(enc.as_ptr(), super_tag, actual.as_mut_ptr());
+            let dlen = DGroup::decode8(enc.as_ptr(), tag8, actual.as_mut_ptr());
             assert_eq!(elen, dlen);
             assert_eq!(group_values, actual);
         }
@@ -254,17 +254,17 @@ where
 }
 
 // Test encoding deltas with EGroup and decoding a superblock with DGroup.
-pub(crate) fn test_super_decode_deltas<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_decode_deltas8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
 where
     <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
             .collect::<Vec<_>>();
-        for super_group in test_groups.chunks_exact(8) {
-            let group_tags = super_group.iter().map(|tg| tg.tag).collect::<Vec<_>>();
+        for group8 in test_groups.chunks_exact(8) {
+            let group_tags = group8.iter().map(|tg| tg.tag).collect::<Vec<_>>();
             let mut sum = EGroup::Elem::one();
-            let group_values = super_group
+            let group_values = group8
                 .iter()
                 .map(|tg| tg.group)
                 .flatten()
@@ -273,7 +273,7 @@ where
                     sum
                 })
                 .collect::<Vec<_>>();
-            let expected_len = super_group.iter().map(|tg| tg.encoded_len).sum::<usize>();
+            let expected_len = group8.iter().map(|tg| tg.data_len).sum::<usize>();
 
             let mut enc = [255u8; 256];
             let mut etag = Vec::<u8>::with_capacity(8);
@@ -290,15 +290,15 @@ where
             assert_eq!(group_tags, etag);
             assert_eq!(expected_len, elen);
 
-            let mut super_tag_bytes = [0u8; 8];
-            super_tag_bytes.copy_from_slice(&etag);
-            let super_tag = u64::from_le_bytes(super_tag_bytes);
-            assert_eq!(elen, DGroup::super_encoded_len(super_tag));
+            let mut tag8_bytes = [0u8; 8];
+            tag8_bytes.copy_from_slice(&etag);
+            let tag8 = u64::from_le_bytes(tag8_bytes);
+            assert_eq!(elen, DGroup::data_len8(tag8));
 
             let mut actual = [DGroup::Elem::zero(); 32];
-            let (dlen, dgroup) = DGroup::super_decode_deltas(
+            let (dlen, dgroup) = DGroup::decode_deltas8(
                 enc.as_ptr(),
-                super_tag,
+                tag8,
                 DGroup::set1(DGroup::Elem::one()),
                 actual.as_mut_ptr(),
             );
@@ -310,17 +310,17 @@ where
 }
 
 // Test encoding deltas with EGroup and skipping a superblock with DGroup.
-pub(crate) fn test_super_skip_deltas<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_skip_deltas8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
 where
     <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
             .collect::<Vec<_>>();
-        for super_group in test_groups.chunks_exact(8) {
-            let group_tags = super_group.iter().map(|tg| tg.tag).collect::<Vec<_>>();
+        for group8 in test_groups.chunks_exact(8) {
+            let group_tags = group8.iter().map(|tg| tg.tag).collect::<Vec<_>>();
             let mut sum = EGroup::Elem::one();
-            let group_values = super_group
+            let group_values = group8
                 .iter()
                 .map(|tg| tg.group)
                 .flatten()
@@ -329,7 +329,7 @@ where
                     sum
                 })
                 .collect::<Vec<_>>();
-            let expected_len = super_group.iter().map(|tg| tg.encoded_len).sum::<usize>();
+            let expected_len = group8.iter().map(|tg| tg.data_len).sum::<usize>();
 
             let mut enc = [255u8; 256];
             let mut etag = Vec::<u8>::with_capacity(8);
@@ -346,13 +346,13 @@ where
             assert_eq!(group_tags, etag);
             assert_eq!(expected_len, elen);
 
-            let mut super_tag_bytes = [0u8; 8];
-            super_tag_bytes.copy_from_slice(&etag);
-            let super_tag = u64::from_le_bytes(super_tag_bytes);
+            let mut tag8_bytes = [0u8; 8];
+            tag8_bytes.copy_from_slice(&etag);
+            let tag8 = u64::from_le_bytes(tag8_bytes);
 
-            let (dlen, dsum) = DGroup::super_skip_deltas(enc.as_ptr(), super_tag);
+            let (dlen, dsum) = DGroup::skip_deltas8(enc.as_ptr(), tag8);
             assert_eq!(elen, dlen);
-            let expected_sum = super_group
+            let expected_sum = group8
                 .iter()
                 .map(|tg| tg.group[0] + tg.group[1] + tg.group[2] + tg.group[3])
                 .fold(EGroup::Elem::zero(), |acc, v| acc + v);
@@ -363,7 +363,7 @@ where
 
 /// Define `group_suite` module with conformance tests for `UnsafeGroup` implementations.
 /// Invoke this inside the module defining your `UnsafeGroupImpl`.
-macro_rules! group_test_suite {
+macro_rules! unsafe_group_test_suite {
     () => {
         #[cfg(test)]
         mod group_suite {
@@ -390,24 +390,24 @@ macro_rules! group_test_suite {
             }
 
             #[test]
-            fn super_decode() {
-                crate::tests::test_super_decode::<UnsafeGroupImpl, UnsafeGroupImpl>();
+            fn decode8() {
+                crate::tests::test_decode8::<UnsafeGroupImpl, UnsafeGroupImpl>();
             }
 
             #[test]
-            fn super_decode_deltas() {
-                crate::tests::test_super_decode_deltas::<UnsafeGroupImpl, UnsafeGroupImpl>();
+            fn decode_deltas8() {
+                crate::tests::test_decode_deltas8::<UnsafeGroupImpl, UnsafeGroupImpl>();
             }
 
             #[test]
-            fn super_skip_deltas() {
-                crate::tests::test_super_skip_deltas::<UnsafeGroupImpl, UnsafeGroupImpl>();
+            fn skip_deltas8() {
+                crate::tests::test_skip_deltas8::<UnsafeGroupImpl, UnsafeGroupImpl>();
             }
         }
     };
 }
 
-pub(crate) use group_test_suite;
+pub(crate) use unsafe_group_test_suite;
 
 /// Define `compat_suite` module that ensures your `UnsafeGroup` implementation is compatible with the scalar implementation.
 /// Invoke this inside the module defining your `UnsafeGroupImpl`.
@@ -439,21 +439,21 @@ macro_rules! compat_test_suite {
             }
 
             #[test]
-            fn super_decode() {
-                crate::tests::test_super_decode::<ScalarGroupImpl, SIMDGroupImpl>();
-                crate::tests::test_super_decode::<SIMDGroupImpl, ScalarGroupImpl>();
+            fn decode8() {
+                crate::tests::test_decode8::<ScalarGroupImpl, SIMDGroupImpl>();
+                crate::tests::test_decode8::<SIMDGroupImpl, ScalarGroupImpl>();
             }
 
             #[test]
-            fn super_decode_deltas() {
-                crate::tests::test_super_decode_deltas::<ScalarGroupImpl, SIMDGroupImpl>();
-                crate::tests::test_super_decode_deltas::<SIMDGroupImpl, ScalarGroupImpl>();
+            fn decode_deltas8() {
+                crate::tests::test_decode_deltas8::<ScalarGroupImpl, SIMDGroupImpl>();
+                crate::tests::test_decode_deltas8::<SIMDGroupImpl, ScalarGroupImpl>();
             }
 
             #[test]
-            fn super_skip_deltas() {
-                crate::tests::test_super_skip_deltas::<ScalarGroupImpl, SIMDGroupImpl>();
-                crate::tests::test_super_skip_deltas::<SIMDGroupImpl, ScalarGroupImpl>();
+            fn skip_deltas8() {
+                crate::tests::test_skip_deltas8::<ScalarGroupImpl, SIMDGroupImpl>();
+                crate::tests::test_skip_deltas8::<SIMDGroupImpl, ScalarGroupImpl>();
             }
         }
     };

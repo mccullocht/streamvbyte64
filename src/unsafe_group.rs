@@ -1,5 +1,5 @@
 use crunchy::unroll;
-use num_traits::{PrimInt, Zero};
+use num_traits::{ops::wrapping::WrappingAdd, PrimInt, Zero};
 use std::fmt::Debug;
 
 /// Represents a single group of 4 integers to compress or decompress.
@@ -8,7 +8,7 @@ use std::fmt::Debug;
 /// safely on arbitrary length slices.
 pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
     /// Element type used in each group.
-    type Elem: PrimInt + Debug;
+    type Elem: PrimInt + Debug + WrappingAdd;
 
     /// Map from the two-bit tag value for a single value to the encoded length.
     /// All of the length values must be <= std::mem::sizeof::<Self::Elem>().
@@ -52,7 +52,7 @@ pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self);
 
     /// Returns the number of bytes a group with the given tag occupies.
-    fn encoded_len(tag: u8) -> usize;
+    fn data_len(tag: u8) -> usize;
 
     /// Skips the group of deltas at input with tag.
     /// Returns the number of input bytes and the sum of the delta values.
@@ -61,64 +61,62 @@ pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
     ///           this function may perform unaligned loads.
     unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem);
 
-    /// Decode a "super" group of 8 groups and write it to output.
+    /// Decode 8 groups and write them to output.
     /// Returns the number of input bytes read.
     ///
     /// _Safety_: this function may read up to std::mem::sizeof::<Self::Elem>() * 32 bytes.
     ///           this function may perform unaligned loads.
     #[inline]
-    unsafe fn super_decode(input: *const u8, super_tag: u64, output: *mut Self::Elem) -> usize {
-        default_super_decode::<Self>(input, super_tag, output)
+    unsafe fn decode8(input: *const u8, tag8: u64, output: *mut Self::Elem) -> usize {
+        default_decode8::<Self>(input, tag8, output)
     }
 
-    /// Decode a "super" group of 8 groups as deltas from a base value and write it to output.
+    /// Decode 8 groups as deltas from a base value and write them to output.
     /// Returns the number of input bytes read and the last decoded group.
     ///
     /// _Safety_: this function may read up to std::mem::sizeof::<Self::Elem>() * 32 bytes.
     ///           this function may perform unaligned loads.
     #[inline]
-    unsafe fn super_decode_deltas(
+    unsafe fn decode_deltas8(
         input: *const u8,
-        super_tag: u64,
+        tag8: u64,
         base: Self,
         output: *mut Self::Elem,
     ) -> (usize, Self) {
-        default_super_decode_deltas(input, super_tag, base, output)
+        default_decode_deltas8(input, tag8, base, output)
     }
 
-    /// Returns the number of encoded bytes for super_tag.
+    /// Returns the number of encoded bytes for 8 groups represented as a single 8-byte value.
     #[inline]
-    fn super_encoded_len(super_tag: u64) -> usize {
-        super_tag
-            .to_ne_bytes()
+    fn data_len8(tag8: u64) -> usize {
+        tag8.to_ne_bytes()
             .into_iter()
-            .map(|tag| Self::encoded_len(tag) as usize)
+            .map(|tag| Self::data_len(tag) as usize)
             .sum()
     }
 
-    /// Skip a "super" group of 8 groups as deltas.
+    /// Skip 8 groups as deltas.
     /// Returns the number of input bytes read and the sum of the value decoded.
     ///
     /// _Safety_: this function may read up to std::mem::sizeof::<Self::Elem>() * 32 bytes.
     ///           this function may perform unaligned loads.
     #[inline]
-    unsafe fn super_skip_deltas(input: *const u8, super_tag: u64) -> (usize, Self::Elem) {
-        default_super_skip_deltas::<Self>(input, super_tag)
+    unsafe fn skip_deltas8(input: *const u8, tag8: u64) -> (usize, Self::Elem) {
+        default_skip_deltas8::<Self>(input, tag8)
     }
 }
 
-// This may be dead on configurations without any SIMD implementations.
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_super_decode<G: UnsafeGroup>(
+pub(crate) unsafe fn default_decode8<G: UnsafeGroup>(
     input: *const u8,
-    super_tag: u64,
+    tag8: u64,
     output: *mut G::Elem,
 ) -> usize {
     let mut read = 0usize;
     unroll! {
         for i in 0..8 {
-            let tag = ((super_tag >> (i * 8)) & 0xff) as u8;
+            let tag = ((tag8 >> (i * 8)) & 0xff) as u8;
             let (r, group) = G::decode(input.add(read), tag);
             G::store_unaligned(output.add(i * 4), group);
             read += r;
@@ -127,12 +125,11 @@ pub(crate) unsafe fn default_super_decode<G: UnsafeGroup>(
     read
 }
 
-// This may be dead on configurations without any SIMD implementations.
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_super_decode_deltas<G: UnsafeGroup>(
+pub(crate) unsafe fn default_decode_deltas8<G: UnsafeGroup>(
     input: *const u8,
-    super_tag: u64,
+    tag8: u64,
     base: G,
     output: *mut G::Elem,
 ) -> (usize, G) {
@@ -140,7 +137,7 @@ pub(crate) unsafe fn default_super_decode_deltas<G: UnsafeGroup>(
     let mut prev = base;
     unroll! {
         for i in 0..8 {
-            let tag = ((super_tag >> (i * 8)) & 0xff) as u8;
+            let tag = ((tag8 >> (i * 8)) & 0xff) as u8;
             let (r, group) = G::decode_deltas(input.add(read), tag, prev);
             G::store_unaligned(output.add(i * 4), group);
             read += r;
@@ -153,18 +150,21 @@ pub(crate) unsafe fn default_super_decode_deltas<G: UnsafeGroup>(
 // This may be dead on configurations without any SIMD implementations.
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_super_skip_deltas<G: UnsafeGroup>(
+pub(crate) unsafe fn default_skip_deltas8<G: UnsafeGroup>(
     input: *const u8,
-    super_tag: u64,
-) -> (usize, G::Elem) {
+    tag8: u64,
+) -> (usize, G::Elem)
+where
+    <G as UnsafeGroup>::Elem: WrappingAdd,
+{
     let mut read = 0usize;
     let mut sum = G::Elem::zero();
     unroll! {
         for i in 0..8 {
-            let tag = ((super_tag >> (i * 8)) & 0xff) as u8;
+            let tag = ((tag8 >> (i * 8)) & 0xff) as u8;
             let (r, s) = G::skip_deltas(input.add(read), tag);
             read += r;
-            sum = sum + s;
+            sum = sum.wrapping_add(&s);
         }
     }
     (read, sum)
@@ -264,7 +264,7 @@ macro_rules! declare_scalar_implementation {
                 }
 
                 #[inline]
-                fn encoded_len(tag: u8) -> usize {
+                fn data_len(tag: u8) -> usize {
                     LENGTH_TABLE[tag as usize] as usize
                 }
 
@@ -276,7 +276,7 @@ macro_rules! declare_scalar_implementation {
             }
 
             #[cfg(test)]
-            crate::tests::group_test_suite!();
+            crate::tests::unsafe_group_test_suite!();
         }
     };
 }
