@@ -140,5 +140,7 @@ pub trait Group32: Sized + Copy + Clone {
     fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, u32);
 }
 
+pub use dist1234::Group32Impl as Group1234;
+
 #[cfg(test)]
 pub(crate) mod tests;

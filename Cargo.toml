@@ -11,4 +11,12 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 crunchy = "0.2.2"
 num-traits = "0.2.15"
+
+[dev-dependencies]
+criterion = "0.3.6"
 rand = "0.8.5"
+
+[[bench]]
+name = "group32_bench"
+path = "benches/group32.rs"
+harness = false
