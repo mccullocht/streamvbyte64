@@ -28,9 +28,10 @@ struct Streams {
     data: Vec<u8>,
 }
 
-fn encoded_stream<G: Group32>(coder: &G, values: &Vec<u32>, delta: bool) -> Streams {
-    let mut tags = vec![0u8; values.len() / 4];
-    let mut data = vec![0u8; values.len() * 4];
+fn encoded_stream<G: Group32>(coder: &G, values: &[u32], delta: bool) -> Streams {
+    let (tbytes, dbytes) = G::max_compressed_bytes(values.len());
+    let mut tags = vec![0u8; tbytes];
+    let mut data = vec![0u8; dbytes];
     let data_len = if delta {
         coder.encode_deltas(1, &values, &mut tags, &mut data)
     } else {
@@ -47,7 +48,7 @@ fn encoded_stream<G: Group32>(coder: &G, values: &Vec<u32>, delta: bool) -> Stre
 
 fn bm_group32<G: Group32>(name: &str, c: &mut Criterion) {
     let coder = G::new();
-    const NUM_ELEM: usize = 1024;
+    const NUM_ELEM: usize = 1280;
     let mut bm_group = c.benchmark_group(name);
     bm_group.throughput(Throughput::Elements(NUM_ELEM as u64));
     for max_bytes in [1, 4] {
@@ -56,8 +57,9 @@ fn bm_group32<G: Group32>(name: &str, c: &mut Criterion) {
             BenchmarkId::new("encode", max_bytes),
             &input_values,
             |b, v| {
-                let mut tags = vec![0u8; v.len() / 4];
-                let mut data = vec![0u8; v.len() * 4];
+                let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
+                let mut tags = vec![0u8; tbytes];
+                let mut data = vec![0u8; dbytes];
                 b.iter(|| assert!(coder.encode(&v, &mut tags, &mut data) > 0))
             },
         );
@@ -67,8 +69,9 @@ fn bm_group32<G: Group32>(name: &str, c: &mut Criterion) {
             BenchmarkId::new("encode_deltas", max_bytes),
             &input_delta_values,
             |b, v| {
-                let mut tags = vec![0u8; v.len() / 4];
-                let mut data = vec![0u8; v.len() * 4];
+                let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
+                let mut tags = vec![0u8; tbytes];
+                let mut data = vec![0u8; dbytes];
                 b.iter(|| assert!(coder.encode_deltas(1, &v, &mut tags, &mut data) > 0))
             },
         );

@@ -21,21 +21,23 @@ enum Impl {
     Neon,
 }
 
+/// `Group1234` packs groups of 4 32-bit integers into lengths of 1, 2, 3, or 4 bytes.
+/// This implementation has acceleration support on little-endian `aarch64` targets using `NEON` instructions.
 #[derive(Clone, Copy)]
-pub struct Group32Impl(Impl);
+pub struct Group1234(Impl);
 
-impl Group32Impl {
+impl Group1234 {
     fn scalar_impl() -> Self {
-        Group32Impl(Impl::Scalar)
+        Group1234(Impl::Scalar)
     }
 }
 
-impl Group32 for Group32Impl {
+impl Group32 for Group1234 {
     fn new() -> Self {
         #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
         {
             if std::arch::is_aarch64_feature_detected!("neon") {
-                return Group32Impl(Impl::Neon);
+                return Group1234(Impl::Neon);
             }
         }
         Self::scalar_impl()
@@ -110,11 +112,12 @@ impl Group32 for Group32Impl {
     }
 }
 
+// TODO: much of this functionality is duplicated in Group1248; remove the duplication.
 #[cfg(test)]
 mod tests {
     extern crate rand;
 
-    use super::Group32Impl;
+    use super::Group1234;
     use crate::Group32;
     use rand::distributions::Uniform;
     use rand::prelude::*;
@@ -140,11 +143,12 @@ mod tests {
 
     #[test]
     fn encode_decode() {
-        let coder = Group32Impl::new();
+        let coder = Group1234::new();
         for max_bytes in 1usize..=4 {
             let expected = generate_array(65536, max_bytes);
-            let mut tags = vec![0u8; expected.len() / 4];
-            let mut data = vec![0u8; expected.len() * 4];
+            let (tbytes, dbytes) = Group1234::max_compressed_bytes(expected.len());
+            let mut tags = vec![0u8; tbytes];
+            let mut data = vec![0u8; dbytes];
 
             let data_len = coder.encode(&expected, &mut tags, &mut data);
             assert!(data_len <= max_bytes * expected.len());
@@ -171,12 +175,13 @@ mod tests {
 
     #[test]
     fn encode_decode_deltas() {
-        let coder = Group32Impl::new();
+        let coder = Group1234::new();
         for initial in 0u32..2 {
             for max_bytes in 1usize..=4 {
                 let expected = generate_cumulative_array(65536, max_bytes, initial);
-                let mut tags = vec![0u8; expected.len() / 4];
-                let mut data = vec![0u8; expected.len() * 4];
+                let (tbytes, dbytes) = Group1234::max_compressed_bytes(expected.len());
+                let mut tags = vec![0u8; tbytes];
+                let mut data = vec![0u8; dbytes];
 
                 let data_len = coder.encode_deltas(initial, &expected, &mut tags, &mut data);
                 assert!(data_len <= max_bytes * expected.len());

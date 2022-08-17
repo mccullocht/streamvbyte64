@@ -27,6 +27,8 @@ enum Impl {
     Neon,
 }
 
+/// `Group1234` packs groups of 4 64-bit integers into lengths of 1, 2, 4, or 8 bytes.
+/// This implementation has acceleration support on little-endian `aarch64` targets using `NEON` instructions.
 #[derive(Clone, Copy)]
 pub struct Group1248(Impl);
 
@@ -131,8 +133,9 @@ mod tests {
         let coder = Group1248::new();
         for max_bytes in 1usize..=8 {
             let expected = generate_array(65536, max_bytes);
-            let mut tags = vec![0u8; expected.len() / 4];
-            let mut data = vec![0u8; expected.len() * 8];
+            let (tbytes, dbytes) = Group1248::max_compressed_bytes(expected.len());
+            let mut tags = vec![0u8; tbytes];
+            let mut data = vec![0u8; dbytes];
 
             let data_len = coder.encode(&expected, &mut tags, &mut data);
             assert!(data_len <= 8 * expected.len());
@@ -163,8 +166,9 @@ mod tests {
         for initial in 0u64..2 {
             for max_bytes in 1usize..=8 {
                 let expected = generate_cumulative_array(65536, max_bytes, initial);
-                let mut tags = vec![0u8; expected.len() / 4];
-                let mut data = vec![0u8; expected.len() * 8];
+                let (tbytes, dbytes) = Group1248::max_compressed_bytes(expected.len());
+                let mut tags = vec![0u8; tbytes];
+                let mut data = vec![0u8; dbytes];
 
                 let data_len = coder.encode_deltas(initial, &expected, &mut tags, &mut data);
                 assert!(data_len <= 8 * expected.len());

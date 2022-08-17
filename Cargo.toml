@@ -1,4 +1,5 @@
 [package]
+# XXX consider changing the name to streamvbyte_64
 name = "stream_vbyte_64"
 version = "0.1.0"
 edition = "2021"
