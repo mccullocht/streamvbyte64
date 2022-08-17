@@ -271,7 +271,13 @@ macro_rules! declare_scalar_implementation {
                 #[inline]
                 unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem) {
                     let (read, group) = Self::decode(input, tag);
-                    (read, group.0.iter().sum())
+                    (
+                        read,
+                        group
+                            .0
+                            .iter()
+                            .fold(Self::Elem::zero(), |s, v| s.wrapping_add(*v)),
+                    )
                 }
             }
 

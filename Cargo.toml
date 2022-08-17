@@ -20,3 +20,8 @@ rand = "0.8.5"
 name = "group32_bench"
 path = "benches/group32.rs"
 harness = false
+
+[[bench]]
+name = "group64_bench"
+path = "benches/group64.rs"
+harness = false
