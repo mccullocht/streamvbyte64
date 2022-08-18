@@ -12,7 +12,7 @@ At the moment group implementations only have acceleration on little-endian `aar
 ## Example without delta-coding
 
 ```
-use stream_vbyte_64::{Group32, Group1234};
+use streamvbyte64::{Group32, Group1234};
 
 let coder = Group1234::new();
 let values = vec![
@@ -40,7 +40,7 @@ assert_eq!(values[11], group[3]);
 ## Example with delta coding
 
 ```
-use stream_vbyte_64::{Group32, Group1234};
+use streamvbyte64::{Group32, Group1234};
 
 let coder = Group1234::new();
 let mut sum = 0u32;

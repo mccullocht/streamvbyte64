@@ -3,7 +3,7 @@ use num_traits::{PrimInt, WrappingAdd};
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::fmt;
-use stream_vbyte_64::{Group1234, Group1248, Group32, Group64};
+use streamvbyte64::{Group1234, Group1248, Group32, Group64};
 
 fn generate_array<I: PrimInt>(len: usize, max_bytes: usize) -> Vec<I> {
     assert!(max_bytes <= std::mem::size_of::<I>());
