@@ -18,11 +18,6 @@ criterion = "0.3.6"
 rand = "0.8.5"
 
 [[bench]]
-name = "group32_bench"
-path = "benches/group32.rs"
-harness = false
-
-[[bench]]
-name = "group64_bench"
-path = "benches/group64.rs"
+name = "streamvbyte"
+path = "benches/streamvbyte.rs"
 harness = false
