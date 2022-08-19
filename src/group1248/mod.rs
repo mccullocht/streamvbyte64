@@ -18,7 +18,7 @@ fn tag_value(v: u64) -> u8 {
     (u32::BITS - t3.leading_zeros()) as u8
 }
 
-crate::unsafe_group::declare_scalar_implementation!(u64, dist1248);
+crate::unsafe_group::declare_scalar_implementation!(u64, group1248);
 
 #[derive(Clone, Copy)]
 enum Impl {

@@ -12,7 +12,7 @@ fn tag_value(v: u32) -> u8 {
     3u32.saturating_sub(v.leading_zeros() / 8) as u8
 }
 
-crate::unsafe_group::declare_scalar_implementation!(u32, dist1234);
+crate::unsafe_group::declare_scalar_implementation!(u32, group1234);
 
 #[derive(Clone, Copy)]
 enum Impl {
