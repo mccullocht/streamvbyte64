@@ -1,5 +1,7 @@
 use crate::unsafe_group::UnsafeGroup;
-use num_traits::{One, PrimInt, Zero};
+use num_traits::{ops::wrapping::WrappingAdd, One, PrimInt, Zero};
+use rand::distributions::Uniform;
+use rand::prelude::*;
 use std::iter::Iterator;
 
 pub(crate) fn test_tag_len<TGroup: UnsafeGroup>() {
@@ -460,3 +462,122 @@ macro_rules! compat_test_suite {
 }
 
 pub(crate) use compat_test_suite;
+
+pub(crate) fn generate_array<I: PrimInt>(len: usize, max_bytes: usize) -> Vec<I> {
+    assert!(max_bytes <= std::mem::size_of::<I>());
+    let seed: &[u8; 32] = &[0xabu8; 32];
+    let mut rng = StdRng::from_seed(*seed);
+    let max_val = (0..max_bytes).fold(0u64, |acc, i| acc | (0xffu64 << i * 8));
+    let between = Uniform::from(0..=max_val);
+    (0..len)
+        .map(|_| between.sample(&mut rng))
+        .map(|v| I::from(v).unwrap())
+        .collect()
+}
+
+pub(crate) fn generate_cumulative_array<I: PrimInt + WrappingAdd>(
+    len: usize,
+    max_bytes: usize,
+    initial: I,
+) -> Vec<I> {
+    let mut values = generate_array::<I>(len, max_bytes);
+    let mut cum = initial;
+    for v in values.iter_mut() {
+        cum = cum.wrapping_add(v);
+        *v = cum;
+    }
+    values
+}
+
+macro_rules! group_test_suite {
+    ($group_trait:ident, $group_impl:ident) => {
+        #[cfg(test)]
+        mod group_suite {
+            use crate::$group_trait;
+            use crate::$group_impl;
+
+            use crate::tests::{generate_array, generate_cumulative_array};
+
+            #[test]
+            fn encode_decode() {
+                let coder = $group_impl::new();
+                for max_bytes in super::TAG_LEN {
+                    let expected = generate_array(65536, max_bytes);
+                    let (tbytes, dbytes) = $group_impl::max_compressed_bytes(expected.len());
+                    let mut tags = vec![0u8; tbytes];
+                    let mut data = vec![0u8; dbytes];
+
+                    let data_len = coder.encode(&expected, &mut tags, &mut data);
+                    assert!(data_len <= max_bytes * expected.len());
+                    data.resize(data_len, 0u8);
+                    data.shrink_to_fit();
+                    assert_eq!(data_len, coder.data_len(&tags));
+                    let mut actual = vec![0; expected.len()];
+                    assert_eq!(data_len, coder.decode(&tags, &data, &mut actual));
+
+                    assert_eq!(expected.len(), actual.len(), "max_bytes={}", max_bytes);
+                    for i in 0..expected.len() {
+                        assert_eq!(
+                            expected[i],
+                            actual[i],
+                            "Value mismatch max_bytes={} at index {} expected context={:?} actual context={:?}",
+                            max_bytes,
+                            i,
+                            &expected[i.saturating_sub(5)..std::cmp::min(expected.len(), i + 5)],
+                            &actual[i.saturating_sub(5)..std::cmp::min(expected.len(), i + 5)],
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn encode_decode_deltas() {
+                let coder = $group_impl::new();
+                for initial in 0..2 {
+                    for max_bytes in super::TAG_LEN {
+                        let expected = generate_cumulative_array(65536, max_bytes, initial);
+                        let (tbytes, dbytes) = $group_impl::max_compressed_bytes(expected.len());
+                        let mut tags = vec![0u8; tbytes];
+                        let mut data = vec![0u8; dbytes];
+
+                        let data_len = coder.encode_deltas(initial, &expected, &mut tags, &mut data);
+                        assert!(
+                            data_len <= max_bytes * expected.len(),
+                            "{} {}",
+                            data_len,
+                            max_bytes * expected.len()
+                        );
+                        data.resize(data_len, 0u8);
+                        data.shrink_to_fit();
+                        assert_eq!(
+                            (data_len, expected.last().unwrap().wrapping_sub(initial)),
+                            coder.skip_deltas(&tags, &data)
+                        );
+                        let mut actual = vec![0; expected.len()];
+                        assert_eq!(
+                            data_len,
+                            coder.decode_deltas(initial, &tags, &data, &mut actual)
+                        );
+
+                        assert_eq!(expected.len(), actual.len(), "max_bytes={}", max_bytes);
+                        for i in 0..expected.len() {
+                            assert_eq!(
+                                expected[i],
+                                actual[i],
+                                "Value mismatch max_bytes={} at index {} expected context={:?} actual context={:?}",
+                                max_bytes,
+                                i,
+                                &expected[i.saturating_sub(5)..std::cmp::min(expected.len(), i + 5)],
+                                &actual[i.saturating_sub(5)..std::cmp::min(expected.len(), i + 5)],
+                            );
+                        }
+                    }
+                }
+            }
+
+            // TODO: test boundary conditions on encode and decode unrolling.
+        }
+    }
+}
+
+pub(crate) use group_test_suite;

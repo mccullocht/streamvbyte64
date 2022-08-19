@@ -1,79 +1,14 @@
 use super::scalar;
+use crate::arch::neon::{data_len8, tag_decode_shuffle_table32, tag_encode_shuffle_table32};
 use crate::unsafe_group::UnsafeGroup;
 use std::arch::aarch64::{
-    uint32x4_t, vaddlvq_u8, vaddq_u32, vaddvq_u32, vaddvq_u8, vandq_u8, vclzq_u32, vdupq_laneq_u32,
-    vdupq_n_u32, vdupq_n_u8, vextq_u32, vld1q_s32, vld1q_u32, vld1q_u64, vld1q_u8, vqtbl1q_u8,
-    vreinterpretq_u32_u8, vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32,
-    vst1q_u32, vst1q_u8, vsubq_u32,
+    uint32x4_t, vaddq_u32, vaddvq_u32, vaddvq_u8, vclzq_u32, vdupq_laneq_u32, vdupq_n_u32,
+    vextq_u32, vld1q_s32, vld1q_u32, vld1q_u8, vqtbl1q_u8, vreinterpretq_u32_u8,
+    vreinterpretq_u8_u32, vshlq_u32, vshrq_n_u32, vst1q_u32, vst1q_u8, vsubq_u32,
 };
 
-const fn fill_encode_shuffle(tag: u8, i: u8, mut shuf: [u8; 16], oidx: usize) -> ([u8; 16], usize) {
-    let vtag = (tag >> (i * 2)) & 0x3;
-    let mut len = 0;
-    if vtag >= 1 {
-        shuf[oidx] = i * 4;
-        len += 1;
-    }
-    if vtag >= 2 {
-        shuf[oidx + 1] = i * 4 + 1;
-        len += 1;
-    }
-    if vtag >= 3 {
-        shuf[oidx + 2] = i * 4 + 2;
-        shuf[oidx + 3] = i * 4 + 3;
-        len += 2;
-    }
-    (shuf, oidx + len)
-}
-
-// Creates a table that maps a tag value to the shuffle that packs 4 input values to an output value.
-const fn tag_encode_shuffle_table() -> [[u8; 16]; 256] {
-    let mut table = [[64u8; 16]; 256];
-    let mut tag = 0usize;
-    while tag < 256 {
-        let (mut shuf, mut oidx) = fill_encode_shuffle(tag as u8, 0, [255u8; 16], 0);
-        (shuf, oidx) = fill_encode_shuffle(tag as u8, 1, shuf, oidx);
-        (shuf, oidx) = fill_encode_shuffle(tag as u8, 2, shuf, oidx);
-        table[tag] = fill_encode_shuffle(tag as u8, 3, shuf, oidx).0;
-        tag += 1;
-    }
-    table
-}
-const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table();
-
-const fn fill_decode_shuffle(tag: u8, i: usize, mut shuf: [u8; 16], iidx: u8) -> ([u8; 16], u8) {
-    let vtag = (tag >> (i * 2)) & 0x3;
-    let mut len = 0;
-    if vtag >= 1 {
-        shuf[i * 4] = iidx;
-        len += 1;
-    }
-    if vtag >= 2 {
-        shuf[i * 4 + 1] = iidx + 1;
-        len += 1;
-    }
-    if vtag >= 3 {
-        shuf[i * 4 + 2] = iidx + 2;
-        shuf[i * 4 + 3] = iidx + 3;
-        len += 2;
-    }
-    (shuf, iidx + len)
-}
-
-// Creates a table that maps a tag value to the shuffle that unpacks 4 input values to an output value.
-const fn tag_decode_shuffle_table() -> [[u8; 16]; 256] {
-    let mut table = [[64u8; 16]; 256];
-    let mut tag = 0usize;
-    while tag < 256 {
-        let (mut shuf, mut oidx) = fill_decode_shuffle(tag as u8, 0, [255u8; 16], 0);
-        (shuf, oidx) = fill_decode_shuffle(tag as u8, 1, shuf, oidx);
-        (shuf, oidx) = fill_decode_shuffle(tag as u8, 2, shuf, oidx);
-        table[tag] = fill_decode_shuffle(tag as u8, 3, shuf, oidx).0;
-        tag += 1;
-    }
-    table
-}
-const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table();
+const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table32(super::TAG_LEN);
+const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table32(super::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct UnsafeGroupImpl(uint32x4_t);
@@ -168,18 +103,8 @@ impl UnsafeGroup for UnsafeGroupImpl {
         (read, vaddvq_u32(group.0))
     }
 
-    // TODO: move nibble table computation to tag_utils
     #[inline]
     fn data_len8(tag8: u64) -> usize {
-        unsafe {
-            // Load tag8 value so that we get a nibble in each of 16 8-bit lanes.
-            let mut nibble_tags = vreinterpretq_u8_u64(vld1q_u64([tag8, tag8 >> 4].as_ptr()));
-            nibble_tags = vandq_u8(nibble_tags, vdupq_n_u8(0xf));
-            let nibble_len = vqtbl1q_u8(
-                vld1q_u8([0, 1, 2, 4, 1, 2, 3, 5, 2, 3, 4, 6, 4, 5, 6, 8].as_ptr()),
-                nibble_tags,
-            );
-            vaddlvq_u8(nibble_len) as usize
-        }
+        data_len8(Self::TAG_LEN, tag8)
     }
 }

@@ -76,7 +76,7 @@ assert_eq!(values[11], group[3]);
 ```
 */
 
-mod dist1248;
+mod arch;
 pub(crate) mod group_impl;
 mod tag_utils;
 mod unsafe_group;
@@ -257,6 +257,7 @@ pub trait Group64: Sized + Copy + Clone {
     fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, u64);
 }
 
+mod dist1248;
 pub use dist1248::Group1248;
 
 #[cfg(test)]
