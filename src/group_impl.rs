@@ -115,8 +115,9 @@ fn decode_to_sink<G: UnsafeGroup, S: DecodeSink>(tags: &[u8], data: &[u8], sink:
     }
 
     let remainder = &tags[tag_index..];
-    if remainder.len() > 0 {
-        assert!(read < data.len());
+    if !remainder.is_empty() {
+        // read <= data.len() as groups with the smallest tag len of 0 may still decode an empty buffer.
+        assert!(read <= data.len());
         // data contains at most G::TAG_LEN[3] * 4 bytes, so allocate a scratch buffer that is double that length and copy so
         // that we can continue to use "unsafe" loads. Note that G::TAG_LEN[3] is not const in this context so we just insert a
         // value that should work if elements are 8 bytes wide.

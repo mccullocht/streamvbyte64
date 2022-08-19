@@ -155,7 +155,7 @@ fn integrate_delta<Elem: PrimInt>(base: Elem, delta: [Elem; 4]) -> [Elem; 4] {
 // Returns a mask that contains the smallest element of each tag byte length.
 fn smol_mask<TGroup: UnsafeGroup>() -> TGroup::Elem {
     let mut base_mask = TGroup::Elem::one();
-    for l in TGroup::TAG_LEN.iter().skip_while(|l| **l == 0).take(3) {
+    for l in TGroup::TAG_LEN.iter().take(3) {
         base_mask = base_mask | (TGroup::Elem::one() << (*l as usize * 8));
     }
     base_mask

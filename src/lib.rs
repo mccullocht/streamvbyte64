@@ -76,7 +76,6 @@ assert_eq!(values[11], group[3]);
 ```
 */
 
-mod dist1234;
 mod dist1248;
 pub(crate) mod group_impl;
 mod tag_utils;
@@ -167,7 +166,11 @@ pub trait Group32: Sized + Copy + Clone {
     fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, u32);
 }
 
+mod dist1234;
 pub use dist1234::Group1234;
+
+mod group0124;
+pub use group0124::Group0124;
 
 /// `Group64` compresses and decompresses groups of 4 64-bit integers together in a byte-aligned format.
 /// Different `Group64` implementations may support different byte length distributions.

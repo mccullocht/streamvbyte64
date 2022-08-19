@@ -3,7 +3,7 @@ use num_traits::{PrimInt, WrappingAdd};
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::fmt;
-use streamvbyte64::{Group1234, Group1248, Group32, Group64};
+use streamvbyte64::{Group0124, Group1234, Group1248, Group32, Group64};
 
 fn generate_array<I: PrimInt>(len: usize, max_bytes: usize) -> Vec<I> {
     assert!(max_bytes <= std::mem::size_of::<I>());
@@ -80,6 +80,7 @@ macro_rules! bm_group_trait {
             for len in [128usize, 1280] {
                 let mut bm_group = c.benchmark_group(format!("{}/len={}", name, len));
                 bm_group.throughput(Throughput::Elements(len as u64));
+                let max_data_len = len * std::mem::size_of::<$elem_type>();
                 for max_bytes in max_bytes {
                     let input_values = generate_array(len, *max_bytes);
                     bm_group.bench_with_input(
@@ -89,7 +90,9 @@ macro_rules! bm_group_trait {
                             let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
                             let mut tags = vec![0u8; tbytes];
                             let mut data = vec![0u8; dbytes];
-                            b.iter(|| assert!(coder.encode(&v, &mut tags, &mut data) > 0))
+                            b.iter(|| {
+                                assert!(coder.encode(&v, &mut tags, &mut data) <= max_data_len)
+                            })
                         },
                     );
 
@@ -101,7 +104,12 @@ macro_rules! bm_group_trait {
                             let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
                             let mut tags = vec![0u8; tbytes];
                             let mut data = vec![0u8; dbytes];
-                            b.iter(|| assert!(coder.encode_deltas(1, &v, &mut tags, &mut data) > 0))
+                            b.iter(|| {
+                                assert!(
+                                    coder.encode_deltas(1, &v, &mut tags, &mut data)
+                                        <= max_data_len
+                                )
+                            })
                         },
                     );
 
@@ -111,13 +119,15 @@ macro_rules! bm_group_trait {
                         &encoded_streams,
                         |b, s| {
                             let mut values = vec![0; s.len];
-                            b.iter(|| assert!(coder.decode(&s.tags, &s.data, &mut values) > 0))
+                            b.iter(|| {
+                                assert!(coder.decode(&s.tags, &s.data, &mut values) <= max_data_len)
+                            })
                         },
                     );
                     bm_group.bench_with_input(
                         BenchmarkId::new("data_len", max_bytes),
                         &encoded_streams,
-                        |b, s| b.iter(|| assert!(coder.data_len(&s.tags) > 0)),
+                        |b, s| b.iter(|| assert!(coder.data_len(&s.tags) <= max_data_len)),
                     );
 
                     let encoded_delta_streams = encoded_stream(&coder, &input_values, true);
@@ -127,14 +137,21 @@ macro_rules! bm_group_trait {
                         |b, s| {
                             let mut values = vec![0; s.len];
                             b.iter(|| {
-                                assert!(coder.decode_deltas(1, &s.tags, &s.data, &mut values) > 0)
+                                assert!(
+                                    coder.decode_deltas(1, &s.tags, &s.data, &mut values)
+                                        <= max_data_len
+                                )
                             })
                         },
                     );
                     bm_group.bench_with_input(
                         BenchmarkId::new("skip_deltas", max_bytes),
                         &encoded_delta_streams,
-                        |b, s| b.iter(|| assert!(coder.skip_deltas(&s.tags, &s.data) > (0, 0))),
+                        |b, s| {
+                            b.iter(|| {
+                                assert!(coder.skip_deltas(&s.tags, &s.data).0 <= max_data_len)
+                            })
+                        },
                     );
                 }
                 bm_group.finish();
@@ -148,6 +165,7 @@ bm_group_trait!(bm_group64, u64, Group64);
 
 fn benchmark(c: &mut Criterion) {
     bm_group32::<Group1234>("Group1234", &[1, 4], c);
+    bm_group32::<Group0124>("Group0124", &[0, 1, 4], c);
     bm_group64::<Group1248>("Group1248", &[1, 4, 8], c);
 }
 
