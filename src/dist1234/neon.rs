@@ -79,7 +79,7 @@ pub(crate) struct UnsafeGroupImpl(uint32x4_t);
 
 impl UnsafeGroup for UnsafeGroupImpl {
     type Elem = u32;
-    const TAG_LEN: [u8; 4] = [1, 2, 3, 4];
+    const TAG_LEN: [usize; 4] = super::TAG_LEN;
 
     #[inline]
     fn set1(value: u32) -> Self {

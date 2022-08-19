@@ -118,7 +118,7 @@ impl UnsafeGroupImpl {
 impl UnsafeGroup for UnsafeGroupImpl {
     type Elem = u64;
 
-    const TAG_LEN: [u8; 4] = super::TAG_LEN;
+    const TAG_LEN: [usize; 4] = super::TAG_LEN;
 
     #[inline]
     fn set1(value: Self::Elem) -> Self {

@@ -32,7 +32,7 @@ where
     Elem: PrimInt,
 {
     tag: u8,
-    dist: [u8; 4],
+    dist: [usize; 4],
     masks: [Elem; 4],
 }
 
@@ -40,7 +40,7 @@ impl<Elem> TagIter<Elem>
 where
     Elem: PrimInt,
 {
-    pub fn new(dist: [u8; 4], masks: [Elem; 4]) -> Self {
+    pub fn new(dist: [usize; 4], masks: [Elem; 4]) -> Self {
         assert!(dist.iter().zip(dist.iter().skip(1)).all(|(a, b)| *a < *b));
         assert!(dist
             .iter()
@@ -104,7 +104,7 @@ where
         Some(TestGroup {
             group,
             tag,
-            data_len: vlens.into_iter().sum::<u8>() as usize,
+            data_len: vlens.into_iter().sum::<usize>(),
         })
     }
 }

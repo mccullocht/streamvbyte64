@@ -12,7 +12,7 @@ pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
 
     /// Map from the two-bit tag value for a single value to the encoded length.
     /// All of the length values must be <= std::mem::sizeof::<Self::Elem>().
-    const TAG_LEN: [u8; 4];
+    const TAG_LEN: [usize; 4];
 
     /// Returns a group where all members of the group are set to value.
     fn set1(value: Self::Elem) -> Self;
@@ -193,7 +193,7 @@ macro_rules! declare_scalar_implementation {
             impl UnsafeGroup for UnsafeGroupImpl {
                 type Elem = $elem;
 
-                const TAG_LEN: [u8; 4] = TAG_LEN;
+                const TAG_LEN: [usize; 4] = TAG_LEN;
 
                 #[inline]
                 fn set1(value: Self::Elem) -> Self {

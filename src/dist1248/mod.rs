@@ -3,7 +3,7 @@ mod neon;
 
 use crate::{group_impl, Group64};
 
-const TAG_LEN: [u8; 4] = [1, 2, 4, 8];
+const TAG_LEN: [usize; 4] = [1, 2, 4, 8];
 const TAG_MASK: [u64; 4] = crate::tag_utils::tag_mask_table64(TAG_LEN);
 
 #[inline]

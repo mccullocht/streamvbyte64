@@ -4,7 +4,7 @@ mod neon;
 use crate::group_impl;
 use crate::Group32;
 
-const TAG_LEN: [u8; 4] = [1, 2, 3, 4];
+const TAG_LEN: [usize; 4] = [1, 2, 3, 4];
 const TAG_MASK: [u32; 4] = crate::tag_utils::tag_mask_table32(TAG_LEN);
 
 #[inline]
@@ -34,12 +34,12 @@ impl Group1234 {
 
 impl Group32 for Group1234 {
     fn new() -> Self {
-        #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-        {
-            if std::arch::is_aarch64_feature_detected!("neon") {
-                return Group1234(Impl::Neon);
-            }
-        }
+        //#[cfg(all(target_arch = "aarch64", target_endian = "little"))]
+        //{
+        //    if std::arch::is_aarch64_feature_detected!("neon") {
+        //        return Group1234(Impl::Neon);
+        //    }
+        //}
         Self::scalar_impl()
     }
 
