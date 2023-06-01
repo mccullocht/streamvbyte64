@@ -1,5 +1,6 @@
-use super::scalar;
+use super::{scalar, CodingDescriptor1248};
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffle_table64};
+use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint64x2_t, uint8x16x2_t, uint8x16x4_t, vaddq_u64, vaddvq_u32, vcgtq_u32, vcgtq_u64,
@@ -9,8 +10,8 @@ use std::arch::aarch64::{
     vshlq_u32, vst1q_u64, vst1q_u8, vsubq_u64,
 };
 
-const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(super::TAG_LEN);
-const DECODE_TABLE: [[u8; 32]; 256] = tag_decode_shuffle_table64(super::TAG_LEN);
+const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
+const DECODE_TABLE: [[u8; 32]; 256] = tag_decode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(uint64x2_t, uint64x2_t);
@@ -54,7 +55,7 @@ impl RawGroupImpl {
 impl RawGroup for RawGroupImpl {
     type Elem = u64;
 
-    const TAG_LEN: [usize; 4] = super::TAG_LEN;
+    const TAG_LEN: [usize; 4] = CodingDescriptor1248::TAG_LEN;
 
     #[inline]
     fn set1(value: Self::Elem) -> Self {

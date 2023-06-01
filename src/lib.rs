@@ -77,6 +77,7 @@ assert_eq!(values[11], group[3]);
 */
 
 mod arch;
+mod coding_descriptor;
 mod group_impl;
 mod raw_group;
 mod tag_utils;

@@ -482,18 +482,20 @@ pub(crate) fn generate_cumulative_array<I: PrimInt + WrappingAdd>(
 }
 
 macro_rules! group_test_suite {
-    ($group_trait:ident, $group_impl:ident) => {
+    ($group_trait:ident, $group_impl:ident, $coding_descriptor:ident) => {
         #[cfg(test)]
         mod group_suite {
             use crate::$group_trait;
             use crate::$group_impl;
+            use crate::coding_descriptor::CodingDescriptor;
+            use super::$coding_descriptor;
 
             use crate::tests::{generate_array, generate_cumulative_array};
 
             #[test]
             fn encode_decode() {
                 let coder = $group_impl::new();
-                for max_bytes in super::TAG_LEN {
+                for max_bytes in $coding_descriptor::TAG_LEN {
                     let expected = generate_array(65536, max_bytes);
                     let (tbytes, dbytes) = $group_impl::max_compressed_bytes(expected.len());
                     let mut tags = vec![0u8; tbytes];
@@ -526,7 +528,7 @@ macro_rules! group_test_suite {
             fn encode_decode_deltas() {
                 let coder = $group_impl::new();
                 for initial in 0..2 {
-                    for max_bytes in super::TAG_LEN {
+                    for max_bytes in $coding_descriptor::TAG_LEN {
                         let expected = generate_cumulative_array(65536, max_bytes, initial);
                         let (tbytes, dbytes) = $group_impl::max_compressed_bytes(expected.len());
                         let mut tags = vec![0u8; tbytes];

@@ -1,18 +1,39 @@
 #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
 mod neon;
 
+use crate::coding_descriptor::CodingDescriptor;
 use crate::group_impl;
 use crate::Group32;
 
-const TAG_LEN: [usize; 4] = [1, 2, 3, 4];
-const TAG_MASK: [u32; 4] = crate::tag_utils::tag_mask_table32(TAG_LEN);
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct CodingDescriptor1234;
 
-#[inline]
-fn tag_value(v: u32) -> u8 {
-    3u32.saturating_sub(v.leading_zeros() / 8) as u8
+impl CodingDescriptor for CodingDescriptor1234 {
+    type Elem = u32;
+
+    const TAG_LEN: [usize; 4] = [1, 2, 3, 4];
+    const TAG_MAX: [Self::Elem; 4] = crate::tag_utils::tag_mask_table32(Self::TAG_LEN);
+
+    #[inline]
+    fn tag_value(value: Self::Elem) -> (u8, usize) {
+        let tag = 3u32.saturating_sub(value.leading_zeros() / 8);
+        (tag as u8, tag as usize + 1)
+    }
+
+    #[inline(always)]
+    fn data_len(tag: u8) -> usize {
+        LENGTH_TABLE[tag as usize] as usize
+    }
 }
+const LENGTH_TABLE: [u8; 256] = crate::tag_utils::tag_length_table(CodingDescriptor1234::TAG_LEN);
 
-crate::raw_group::declare_scalar_implementation!(u32, group1234);
+mod scalar {
+    pub(crate) type RawGroupImpl =
+        crate::raw_group::scalar::ScalarRawGroupImpl<super::CodingDescriptor1234>;
+
+    #[cfg(test)]
+    crate::tests::raw_group_test_suite!();
+}
 
 #[derive(Clone, Copy)]
 enum Impl {
@@ -113,4 +134,4 @@ impl Group32 for Group1234 {
 }
 
 #[cfg(test)]
-crate::tests::group_test_suite!(Group32, Group1234);
+crate::tests::group_test_suite!(Group32, Group1234, CodingDescriptor1234);

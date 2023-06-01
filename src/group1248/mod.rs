@@ -1,24 +1,45 @@
 #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
 mod neon;
 
+use crate::coding_descriptor::CodingDescriptor;
 use crate::{group_impl, Group64};
 
-const TAG_LEN: [usize; 4] = [1, 2, 4, 8];
-const TAG_MASK: [u64; 4] = crate::tag_utils::tag_mask_table64(TAG_LEN);
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct CodingDescriptor1248;
 
-#[inline]
-fn tag_value(v: u64) -> u8 {
-    // compute a 3-bit tag value in [0,7] in the same way we do for dist1234.
-    // then take ~log2 to get a mapping from bytes required to length:
-    // [0,1] => 0
-    // [2,2] => 1
-    // [3,4] => 2
-    // [5,8] => 3
-    let t3 = 7u32.saturating_sub(v.leading_zeros() / 8);
-    (u32::BITS - t3.leading_zeros()) as u8
+impl CodingDescriptor for CodingDescriptor1248 {
+    type Elem = u64;
+
+    const TAG_LEN: [usize; 4] = [1, 2, 4, 8];
+    const TAG_MAX: [Self::Elem; 4] = crate::tag_utils::tag_mask_table64(Self::TAG_LEN);
+
+    #[inline]
+    fn tag_value(value: Self::Elem) -> (u8, usize) {
+        // compute a 3-bit tag value in [0,7] in the same way we do for dist1234.
+        // then take ~log2 to get a mapping from bytes required to length:
+        // [0,1] => 0
+        // [2,2] => 1
+        // [3,4] => 2
+        // [5,8] => 3
+        let t3 = 7u32.saturating_sub(value.leading_zeros() / 8);
+        let tag = u32::BITS - t3.leading_zeros();
+        (tag as u8, Self::TAG_LEN[tag as usize])
+    }
+
+    #[inline(always)]
+    fn data_len(tag: u8) -> usize {
+        LENGTH_TABLE[tag as usize] as usize
+    }
 }
+const LENGTH_TABLE: [u8; 256] = crate::tag_utils::tag_length_table(CodingDescriptor1248::TAG_LEN);
 
-crate::raw_group::declare_scalar_implementation!(u64, group1248);
+mod scalar {
+    pub(crate) type RawGroupImpl =
+        crate::raw_group::scalar::ScalarRawGroupImpl<super::CodingDescriptor1248>;
+
+    #[cfg(test)]
+    crate::tests::raw_group_test_suite!();
+}
 
 #[derive(Clone, Copy)]
 enum Impl {
@@ -101,4 +122,4 @@ impl Group64 for Group1248 {
 }
 
 #[cfg(test)]
-crate::tests::group_test_suite!(Group64, Group1248);
+crate::tests::group_test_suite!(Group64, Group1248, CodingDescriptor1248);

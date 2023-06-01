@@ -1,5 +1,6 @@
-use super::scalar;
+use super::{scalar, CodingDescriptor1234};
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table32, tag_encode_shuffle_table32};
+use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use crunchy::unroll;
 use std::arch::aarch64::{
@@ -10,15 +11,15 @@ use std::arch::aarch64::{
     vst1q_u32, vst1q_u8, vst4q_u8, vsubq_u32,
 };
 
-const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table32(super::TAG_LEN);
-const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table32(super::TAG_LEN);
+const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table32(CodingDescriptor1234::TAG_LEN);
+const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table32(CodingDescriptor1234::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(uint32x4_t);
 
 impl RawGroup for RawGroupImpl {
     type Elem = u32;
-    const TAG_LEN: [usize; 4] = super::TAG_LEN;
+    const TAG_LEN: [usize; 4] = CodingDescriptor1234::TAG_LEN;
 
     #[inline]
     fn set1(value: u32) -> Self {

@@ -1,5 +1,5 @@
 use crunchy::unroll;
-use num_traits::{ops::wrapping::WrappingAdd, PrimInt, Zero};
+use num_traits::{ops::wrapping::WrappingAdd, PrimInt, WrappingSub, Zero};
 use std::fmt::Debug;
 
 /// Implementation of streamvbyte coding in groups of 4 (or multiples of 4).
@@ -11,7 +11,7 @@ use std::fmt::Debug;
 /// operations.
 pub(crate) trait RawGroup: Sized + Copy + Debug {
     /// Element type used in each group.
-    type Elem: PrimInt + Debug + WrappingAdd;
+    type Elem: PrimInt + Debug + WrappingAdd + WrappingSub;
 
     /// Map from the two-bit tag value for a single value to the encoded length.
     /// All of the length values must be <= std::mem::sizeof::<Self::Elem>().
@@ -173,121 +173,113 @@ where
     (read, sum)
 }
 
-/// Creates a scalar implementation for a element with and encoded byte width distribution.
-/// The module must declare the following items at the module level:
-///     fn tag_value(value: $elem) -> u8;
-///     const TAG_LEN: [u8; 4];
-///     const TAG_MASK: [$elem; 4];
-macro_rules! declare_scalar_implementation {
-    ($elem: ty, $distmod:ident) => {
-        mod scalar {
-            use crunchy::unroll;
-            use num_traits::Zero;
-            use std::ptr::{read_unaligned, write_unaligned};
+pub(crate) mod scalar {
+    use crunchy::unroll;
+    use num_traits::{ops::wrapping::WrappingAdd, ops::wrapping::WrappingSub, PrimInt, Zero};
+    use std::ptr::{read_unaligned, write_unaligned};
 
-            use crate::raw_group::RawGroup;
-            use crate::$distmod::{tag_value, TAG_LEN, TAG_MASK};
+    use super::RawGroup;
+    use crate::coding_descriptor::CodingDescriptor;
 
-            const LENGTH_TABLE: [u8; 256] = crate::tag_utils::tag_length_table(TAG_LEN);
+    /// A scalar implementation of `RawGroup`.
+    ///
+    /// This implementation is essentially derived from the `CodingDescriptor` parameter which is
+    /// used to adjust behavior based on tag length distribution and element type and does not use
+    /// any sort of SIMD acceleration.
+    #[derive(Copy, Clone, Debug)]
+    pub(crate) struct ScalarRawGroupImpl<D: CodingDescriptor>([D::Elem; 4]);
 
-            #[derive(Clone, Copy, Debug)]
-            pub(crate) struct RawGroupImpl([$elem; 4]);
+    impl<D> RawGroup for ScalarRawGroupImpl<D>
+    where
+        D: CodingDescriptor,
+    {
+        type Elem = D::Elem;
 
-            impl RawGroup for RawGroupImpl {
-                type Elem = $elem;
+        const TAG_LEN: [usize; 4] = D::TAG_LEN;
 
-                const TAG_LEN: [usize; 4] = TAG_LEN;
+        #[inline]
+        fn set1(value: Self::Elem) -> Self {
+            ScalarRawGroupImpl([value; 4])
+        }
 
-                #[inline]
-                fn set1(value: Self::Elem) -> Self {
-                    RawGroupImpl([value; 4])
-                }
+        #[inline]
+        unsafe fn load_unaligned(ptr: *const Self::Elem) -> Self {
+            ScalarRawGroupImpl(read_unaligned(ptr as *const [Self::Elem; 4]))
+        }
 
-                #[inline]
-                unsafe fn load_unaligned(ptr: *const Self::Elem) -> Self {
-                    RawGroupImpl(read_unaligned(ptr as *const [Self::Elem; 4]))
-                }
+        #[inline]
+        unsafe fn store_unaligned(ptr: *mut Self::Elem, group: Self) {
+            write_unaligned(ptr as *mut [Self::Elem; 4], group.0)
+        }
 
-                #[inline]
-                unsafe fn store_unaligned(ptr: *mut Self::Elem, group: Self) {
-                    write_unaligned(ptr as *mut [Self::Elem; 4], group.0)
-                }
-
-                #[inline]
-                unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-                    let mut tag = 0;
-                    let mut written = 0;
-                    unroll! {
-                        for i in 0..4 {
-                            let v = group.0[i];
-                            write_unaligned(output.add(written) as *mut Self::Elem, v);
-                            let vtag = tag_value(v);
-                            tag |= vtag << (i * 2);
-                            written += Self::TAG_LEN[vtag as usize] as usize;
-                        }
-                    }
-                    (tag, written)
-                }
-
-                #[inline]
-                unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-                    let deltas = RawGroupImpl([
-                        group.0[0].wrapping_sub(base.0[3]),
-                        group.0[1].wrapping_sub(group.0[0]),
-                        group.0[2].wrapping_sub(group.0[1]),
-                        group.0[3].wrapping_sub(group.0[2]),
-                    ]);
-                    Self::encode(output, deltas)
-                }
-
-                #[inline]
-                unsafe fn decode(input: *const u8, tag: u8) -> (usize, Self) {
-                    let mut buf = [Self::Elem::zero(); 4];
-                    let mut read = 0usize;
-                    unroll! {
-                        for i in 0..4 {
-                            let vtag = (tag >> (i * 2)) & 0x3;
-                            buf[i] = read_unaligned(input.add(read) as *const Self::Elem)
-                                & TAG_MASK[vtag as usize];
-                            read += Self::TAG_LEN[vtag as usize] as usize;
-                        }
-                    }
-                    (read, RawGroupImpl(buf))
-                }
-
-                #[inline]
-                unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
-                    let (read, deltas) = Self::decode(input, tag);
-                    let mut group = [Self::Elem::zero(); 4];
-                    group[0] = base.0[3].wrapping_add(deltas.0[0]);
-                    group[1] = group[0].wrapping_add(deltas.0[1]);
-                    group[2] = group[1].wrapping_add(deltas.0[2]);
-                    group[3] = group[2].wrapping_add(deltas.0[3]);
-                    (read, RawGroupImpl(group))
-                }
-
-                #[inline]
-                fn data_len(tag: u8) -> usize {
-                    LENGTH_TABLE[tag as usize] as usize
-                }
-
-                #[inline]
-                unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem) {
-                    let (read, group) = Self::decode(input, tag);
-                    (
-                        read,
-                        group
-                            .0
-                            .iter()
-                            .fold(Self::Elem::zero(), |s, v| s.wrapping_add(*v)),
-                    )
+        #[inline]
+        unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
+            let mut tag = 0;
+            let mut written = 0;
+            unroll! {
+                for i in 0..4 {
+                    let v = group.0[i];
+                    write_unaligned(output.add(written) as *mut Self::Elem, v.to_le());
+                    let (vtag, len) = D::tag_value(v);
+                    tag |= vtag << (i * 2);
+                    written += len;
                 }
             }
-
-            #[cfg(test)]
-            crate::tests::raw_group_test_suite!();
+            (tag, written)
         }
-    };
-}
 
-pub(crate) use declare_scalar_implementation;
+        #[inline]
+        unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
+            let deltas = ScalarRawGroupImpl([
+                group.0[0].wrapping_sub(&base.0[3]),
+                group.0[1].wrapping_sub(&group.0[0]),
+                group.0[2].wrapping_sub(&group.0[1]),
+                group.0[3].wrapping_sub(&group.0[2]),
+            ]);
+            Self::encode(output, deltas)
+        }
+
+        #[inline]
+        unsafe fn decode(input: *const u8, tag: u8) -> (usize, Self) {
+            let mut buf = [Self::Elem::zero(); 4];
+            let mut read = 0usize;
+            unroll! {
+                for i in 0..4 {
+                    let vtag = (tag >> (i * 2)) & 0x3;
+                    buf[i] = Self::Elem::from_le(read_unaligned(input.add(read) as *const Self::Elem))
+                        & D::TAG_MAX[vtag as usize];
+                    read += Self::TAG_LEN[vtag as usize];
+                }
+            }
+            (read, ScalarRawGroupImpl(buf))
+        }
+
+        #[inline]
+        unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
+            let (read, deltas) = Self::decode(input, tag);
+            let mut group = [Self::Elem::zero(); 4];
+            group[0] = base.0[3].wrapping_add(&deltas.0[0]);
+            group[1] = group[0].wrapping_add(&deltas.0[1]);
+            group[2] = group[1].wrapping_add(&deltas.0[2]);
+            group[3] = group[2].wrapping_add(&deltas.0[3]);
+            (read, ScalarRawGroupImpl(group))
+        }
+
+        #[inline]
+        fn data_len(tag: u8) -> usize {
+            D::data_len(tag)
+        }
+
+        #[inline]
+        unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem) {
+            let (read, group) = Self::decode(input, tag);
+            (
+                read,
+                group
+                    .0
+                    .iter()
+                    .fold(Self::Elem::zero(), |s, v| s.wrapping_add(v)),
+            )
+        }
+    }
+}
