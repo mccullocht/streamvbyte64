@@ -2,11 +2,14 @@ use crunchy::unroll;
 use num_traits::{ops::wrapping::WrappingAdd, PrimInt, Zero};
 use std::fmt::Debug;
 
-/// Represents a single group of 4 integers to compress or decompress.
-/// Most implementations of this trait are unsafe in that they will read or write
-/// the byte size of the group on every operation and need to be wrapped to behave
-/// safely on arbitrary length slices.
-pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
+/// Implementation of streamvbyte coding in groups of 4 (or multiples of 4).
+///
+/// A RawGroup object represents a single group of exactly 4 integers of `Elem`, although methods
+/// may be provided to code multiple groups at once into memory.
+///
+/// Many of these methods are unsafe as they read or write raw pointers or perform unaligned memory
+/// operations.
+pub(crate) trait RawGroup: Sized + Copy + Debug {
     /// Element type used in each group.
     type Elem: PrimInt + Debug + WrappingAdd;
 
@@ -91,7 +94,7 @@ pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
     fn data_len8(tag8: u64) -> usize {
         tag8.to_ne_bytes()
             .into_iter()
-            .map(|tag| Self::data_len(tag) as usize)
+            .map(|tag| Self::data_len(tag))
             .sum()
     }
 
@@ -108,7 +111,7 @@ pub(crate) trait UnsafeGroup: Sized + Copy + Debug {
 
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_decode8<G: UnsafeGroup>(
+pub(crate) unsafe fn default_decode8<G: RawGroup>(
     input: *const u8,
     tag8: u64,
     output: *mut G::Elem,
@@ -127,7 +130,7 @@ pub(crate) unsafe fn default_decode8<G: UnsafeGroup>(
 
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_decode_deltas8<G: UnsafeGroup>(
+pub(crate) unsafe fn default_decode_deltas8<G: RawGroup>(
     input: *const u8,
     tag8: u64,
     base: G,
@@ -150,12 +153,12 @@ pub(crate) unsafe fn default_decode_deltas8<G: UnsafeGroup>(
 // This may be dead on configurations without any SIMD implementations.
 #[allow(dead_code)]
 #[inline(always)]
-pub(crate) unsafe fn default_skip_deltas8<G: UnsafeGroup>(
+pub(crate) unsafe fn default_skip_deltas8<G: RawGroup>(
     input: *const u8,
     tag8: u64,
 ) -> (usize, G::Elem)
 where
-    <G as UnsafeGroup>::Elem: WrappingAdd,
+    <G as RawGroup>::Elem: WrappingAdd,
 {
     let mut read = 0usize;
     let mut sum = G::Elem::zero();
@@ -182,27 +185,27 @@ macro_rules! declare_scalar_implementation {
             use num_traits::Zero;
             use std::ptr::{read_unaligned, write_unaligned};
 
-            use crate::unsafe_group::UnsafeGroup;
+            use crate::raw_group::RawGroup;
             use crate::$distmod::{tag_value, TAG_LEN, TAG_MASK};
 
             const LENGTH_TABLE: [u8; 256] = crate::tag_utils::tag_length_table(TAG_LEN);
 
             #[derive(Clone, Copy, Debug)]
-            pub(crate) struct UnsafeGroupImpl([$elem; 4]);
+            pub(crate) struct RawGroupImpl([$elem; 4]);
 
-            impl UnsafeGroup for UnsafeGroupImpl {
+            impl RawGroup for RawGroupImpl {
                 type Elem = $elem;
 
                 const TAG_LEN: [usize; 4] = TAG_LEN;
 
                 #[inline]
                 fn set1(value: Self::Elem) -> Self {
-                    UnsafeGroupImpl([value; 4])
+                    RawGroupImpl([value; 4])
                 }
 
                 #[inline]
                 unsafe fn load_unaligned(ptr: *const Self::Elem) -> Self {
-                    UnsafeGroupImpl(read_unaligned(ptr as *const [Self::Elem; 4]))
+                    RawGroupImpl(read_unaligned(ptr as *const [Self::Elem; 4]))
                 }
 
                 #[inline]
@@ -228,7 +231,7 @@ macro_rules! declare_scalar_implementation {
 
                 #[inline]
                 unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-                    let deltas = UnsafeGroupImpl([
+                    let deltas = RawGroupImpl([
                         group.0[0].wrapping_sub(base.0[3]),
                         group.0[1].wrapping_sub(group.0[0]),
                         group.0[2].wrapping_sub(group.0[1]),
@@ -249,7 +252,7 @@ macro_rules! declare_scalar_implementation {
                             read += Self::TAG_LEN[vtag as usize] as usize;
                         }
                     }
-                    (read, UnsafeGroupImpl(buf))
+                    (read, RawGroupImpl(buf))
                 }
 
                 #[inline]
@@ -260,7 +263,7 @@ macro_rules! declare_scalar_implementation {
                     group[1] = group[0].wrapping_add(deltas.0[1]);
                     group[2] = group[1].wrapping_add(deltas.0[2]);
                     group[3] = group[2].wrapping_add(deltas.0[3]);
-                    (read, UnsafeGroupImpl(group))
+                    (read, RawGroupImpl(group))
                 }
 
                 #[inline]
@@ -282,7 +285,7 @@ macro_rules! declare_scalar_implementation {
             }
 
             #[cfg(test)]
-            crate::tests::unsafe_group_test_suite!();
+            crate::tests::raw_group_test_suite!();
         }
     };
 }

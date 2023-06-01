@@ -78,10 +78,10 @@ assert_eq!(values[11], group[3]);
 
 mod arch;
 mod group_impl;
+mod raw_group;
 mod tag_utils;
-mod unsafe_group;
 
-// TODO: add a GroupTag trait that is shared with UnsafeGroup, it would be useful for testing.
+// TODO: add a GroupTag trait that is shared with RawGroup, it would be useful for testing.
 
 /// `Group32` compresses and decompresses groups of 4 32-bit integers together in a byte-aligned format.
 /// Different `Group32` implementations may support different byte length distributions.

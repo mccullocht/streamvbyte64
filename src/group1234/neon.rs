@@ -1,6 +1,6 @@
 use super::scalar;
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table32, tag_encode_shuffle_table32};
-use crate::unsafe_group::UnsafeGroup;
+use crate::raw_group::RawGroup;
 use crunchy::unroll;
 use std::arch::aarch64::{
     uint32x4_t, uint8x16x4_t, vaddlvq_u8, vaddq_u16, vaddq_u32, vaddvq_u32, vclzq_u32,
@@ -13,22 +13,21 @@ use std::arch::aarch64::{
 const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table32(super::TAG_LEN);
 const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table32(super::TAG_LEN);
 
-// Value length for nibble-length tags.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct UnsafeGroupImpl(uint32x4_t);
+pub(crate) struct RawGroupImpl(uint32x4_t);
 
-impl UnsafeGroup for UnsafeGroupImpl {
+impl RawGroup for RawGroupImpl {
     type Elem = u32;
     const TAG_LEN: [usize; 4] = super::TAG_LEN;
 
     #[inline]
     fn set1(value: u32) -> Self {
-        UnsafeGroupImpl(unsafe { vdupq_n_u32(value) })
+        RawGroupImpl(unsafe { vdupq_n_u32(value) })
     }
 
     #[inline]
     unsafe fn load_unaligned(ptr: *const u32) -> Self {
-        UnsafeGroupImpl(vld1q_u32(ptr))
+        RawGroupImpl(vld1q_u32(ptr))
     }
 
     #[inline]
@@ -60,7 +59,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-        let deltas = UnsafeGroupImpl(vsubq_u32(group.0, vextq_u32(base.0, group.0, 3)));
+        let deltas = RawGroupImpl(vsubq_u32(group.0, vextq_u32(base.0, group.0, 3)));
         Self::encode(output, deltas)
     }
 
@@ -71,7 +70,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
             vld1q_u8(input),
             vld1q_u8(DECODE_TABLE[tag as usize].as_ptr()),
         ));
-        (Self::data_len(tag), UnsafeGroupImpl(v))
+        (Self::data_len(tag), RawGroupImpl(v))
     }
 
     #[inline]
@@ -84,12 +83,12 @@ impl UnsafeGroup for UnsafeGroupImpl {
         let a_ab_bc_cd = vaddq_u32(a_b_c_d, z_a_b_c);
         let z_z_a_ab = vextq_u32(z_z_z_z, a_ab_bc_cd, 2);
         let pa_pab_pbc_pbd = vaddq_u32(p_p_p_p, a_ab_bc_cd);
-        (read, UnsafeGroupImpl(vaddq_u32(pa_pab_pbc_pbd, z_z_a_ab)))
+        (read, RawGroupImpl(vaddq_u32(pa_pab_pbc_pbd, z_z_a_ab)))
     }
 
     #[inline]
     fn data_len(tag: u8) -> usize {
-        scalar::UnsafeGroupImpl::data_len(tag)
+        scalar::RawGroupImpl::data_len(tag)
     }
 
     #[inline]
@@ -113,7 +112,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
             }
             return 32;
         }
-        crate::unsafe_group::default_decode8::<Self>(input, tag8, output)
+        crate::raw_group::default_decode8::<Self>(input, tag8, output)
     }
 
     #[inline]
@@ -145,9 +144,9 @@ impl UnsafeGroup for UnsafeGroupImpl {
                     p = pabcde_pabcdef_pabcdefg_pabcdefgh;
                 }
             }
-            return (32, UnsafeGroupImpl(p));
+            return (32, RawGroupImpl(p));
         }
-        crate::unsafe_group::default_decode_deltas8(input, tag8, base, output)
+        crate::raw_group::default_decode_deltas8(input, tag8, base, output)
     }
 
     #[inline]
@@ -164,21 +163,21 @@ impl UnsafeGroup for UnsafeGroupImpl {
             let sum = vaddlvq_u8(sg.0) + vaddlvq_u8(sg.1);
             return (32, Self::Elem::from(sum));
         }
-        crate::unsafe_group::default_skip_deltas8::<Self>(input, tag8)
+        crate::raw_group::default_skip_deltas8::<Self>(input, tag8)
     }
 }
 
 #[cfg(test)]
-crate::tests::unsafe_group_test_suite!();
+crate::tests::raw_group_test_suite!();
 
 #[cfg(test)]
 crate::tests::compat_test_suite!();
 
 #[cfg(test)]
 mod tests {
-    use crate::unsafe_group::UnsafeGroup;
+    use crate::raw_group::RawGroup;
 
-    use super::UnsafeGroupImpl;
+    use super::RawGroupImpl;
 
     #[test]
     fn decode8_1byte() {
@@ -189,7 +188,7 @@ mod tests {
             .map(|(i, _)| i as u8)
             .collect::<Vec<_>>();
         let mut output = [0u32; 32];
-        let dlen = unsafe { UnsafeGroupImpl::decode8(input.as_ptr(), 0, output.as_mut_ptr()) };
+        let dlen = unsafe { RawGroupImpl::decode8(input.as_ptr(), 0, output.as_mut_ptr()) };
 
         assert_eq!(dlen, 32);
         assert_eq!(input.iter().map(|v| *v as u32).collect::<Vec<_>>(), output);
@@ -200,10 +199,10 @@ mod tests {
         let input = std::iter::repeat(1u8).take(32).collect::<Vec<_>>();
         let mut output = [0u32; 32];
         let (dlen, _) = unsafe {
-            UnsafeGroupImpl::decode_deltas8(
+            RawGroupImpl::decode_deltas8(
                 input.as_ptr(),
                 0,
-                UnsafeGroupImpl::set1(1),
+                RawGroupImpl::set1(1),
                 output.as_mut_ptr(),
             )
         };
@@ -225,7 +224,7 @@ mod tests {
             .enumerate()
             .map(|(i, _)| i as u8)
             .collect::<Vec<_>>();
-        let (dlen, sum) = unsafe { UnsafeGroupImpl::skip_deltas8(input.as_ptr(), 0) };
+        let (dlen, sum) = unsafe { RawGroupImpl::skip_deltas8(input.as_ptr(), 0) };
 
         assert_eq!(dlen, 32);
         assert_eq!(input.iter().map(|v| *v as u32).sum::<u32>(), sum);

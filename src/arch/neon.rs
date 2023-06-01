@@ -3,7 +3,7 @@ use std::arch::aarch64::{
 };
 
 /// Generate a table mapping the lower half (nibble) of a tag to the length of those two entries.
-/// This is used to speed computation of UnsafeGroup::data_len8().
+/// This is used to speed computation of RawGroup::data_len8().
 const fn generate_nibble_tag_len_table(tag_len: [usize; 4]) -> [u8; 16] {
     let mut table = [0u8; 16];
     let mut tag = 0usize;
@@ -14,7 +14,7 @@ const fn generate_nibble_tag_len_table(tag_len: [usize; 4]) -> [u8; 16] {
     table
 }
 
-/// Shared implementation of UnsafeGroup::data_len8().
+/// Shared implementation of RawGroup::data_len8().
 /// This function is inline so the compiler can generate a decode table from tag_len as a constant.
 #[inline(always)]
 pub(crate) fn data_len8(tag_len: [usize; 4], tag8: u64) -> usize {

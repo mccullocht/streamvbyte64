@@ -1,6 +1,6 @@
 use super::scalar;
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table32, tag_encode_shuffle_table32};
-use crate::unsafe_group::UnsafeGroup;
+use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint32x4_t, vaddq_u32, vaddvq_u32, vaddvq_u8, vclzq_u32, vdupq_laneq_u32, vdupq_n_u32,
     vextq_u32, vld1q_s32, vld1q_u32, vld1q_u8, vqtbl1q_u8, vreinterpretq_u32_u8,
@@ -11,20 +11,20 @@ const ENCODE_TABLE: [[u8; 16]; 256] = tag_encode_shuffle_table32(super::TAG_LEN)
 const DECODE_TABLE: [[u8; 16]; 256] = tag_decode_shuffle_table32(super::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct UnsafeGroupImpl(uint32x4_t);
+pub(crate) struct RawGroupImpl(uint32x4_t);
 
-impl UnsafeGroup for UnsafeGroupImpl {
+impl RawGroup for RawGroupImpl {
     type Elem = u32;
     const TAG_LEN: [usize; 4] = super::TAG_LEN;
 
     #[inline]
     fn set1(value: u32) -> Self {
-        UnsafeGroupImpl(unsafe { vdupq_n_u32(value) })
+        RawGroupImpl(unsafe { vdupq_n_u32(value) })
     }
 
     #[inline]
     unsafe fn load_unaligned(ptr: *const u32) -> Self {
-        UnsafeGroupImpl(vld1q_u32(ptr))
+        RawGroupImpl(vld1q_u32(ptr))
     }
 
     #[inline]
@@ -65,7 +65,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-        let deltas = UnsafeGroupImpl(vsubq_u32(group.0, vextq_u32(base.0, group.0, 3)));
+        let deltas = RawGroupImpl(vsubq_u32(group.0, vextq_u32(base.0, group.0, 3)));
         Self::encode(output, deltas)
     }
 
@@ -76,7 +76,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
             vld1q_u8(input),
             vld1q_u8(DECODE_TABLE[tag as usize].as_ptr()),
         ));
-        (Self::data_len(tag), UnsafeGroupImpl(v))
+        (Self::data_len(tag), RawGroupImpl(v))
     }
 
     #[inline]
@@ -89,12 +89,12 @@ impl UnsafeGroup for UnsafeGroupImpl {
         let a_ab_bc_cd = vaddq_u32(a_b_c_d, z_a_b_c);
         let z_z_a_ab = vextq_u32(z_z_z_z, a_ab_bc_cd, 2);
         let pa_pab_pbc_pbd = vaddq_u32(p_p_p_p, a_ab_bc_cd);
-        (read, UnsafeGroupImpl(vaddq_u32(pa_pab_pbc_pbd, z_z_a_ab)))
+        (read, RawGroupImpl(vaddq_u32(pa_pab_pbc_pbd, z_z_a_ab)))
     }
 
     #[inline]
     fn data_len(tag: u8) -> usize {
-        scalar::UnsafeGroupImpl::data_len(tag)
+        scalar::RawGroupImpl::data_len(tag)
     }
 
     #[inline]
@@ -108,3 +108,9 @@ impl UnsafeGroup for UnsafeGroupImpl {
         data_len8(Self::TAG_LEN, tag8)
     }
 }
+
+#[cfg(test)]
+crate::tests::raw_group_test_suite!();
+
+#[cfg(test)]
+crate::tests::compat_test_suite!();

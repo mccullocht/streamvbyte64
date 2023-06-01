@@ -1,6 +1,6 @@
 use super::scalar;
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffle_table64};
-use crate::unsafe_group::UnsafeGroup;
+use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint64x2_t, uint8x16x2_t, uint8x16x4_t, vaddq_u64, vaddvq_u32, vcgtq_u32, vcgtq_u64,
     vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vdupq_n_u8, vextq_u64, vld1q_s32, vld1q_u64,
@@ -13,9 +13,9 @@ const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(super::TAG_LEN)
 const DECODE_TABLE: [[u8; 32]; 256] = tag_decode_shuffle_table64(super::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct UnsafeGroupImpl(uint64x2_t, uint64x2_t);
+pub(crate) struct RawGroupImpl(uint64x2_t, uint64x2_t);
 
-impl UnsafeGroupImpl {
+impl RawGroupImpl {
     #[inline]
     unsafe fn compute_tag(group: Self) -> u8 {
         // Perform a saturating narrow of the group values to get a smaller vector for comparison.
@@ -51,20 +51,20 @@ impl UnsafeGroupImpl {
     }
 }
 
-impl UnsafeGroup for UnsafeGroupImpl {
+impl RawGroup for RawGroupImpl {
     type Elem = u64;
 
     const TAG_LEN: [usize; 4] = super::TAG_LEN;
 
     #[inline]
     fn set1(value: Self::Elem) -> Self {
-        unsafe { UnsafeGroupImpl(vdupq_n_u64(value), vdupq_n_u64(value)) }
+        unsafe { RawGroupImpl(vdupq_n_u64(value), vdupq_n_u64(value)) }
     }
 
     #[inline]
     unsafe fn load_unaligned(ptr: *const Self::Elem) -> Self {
         // NB: there are two intrinsic calls but this should be translated into a single ldp instruction.
-        UnsafeGroupImpl(vld1q_u64(ptr), vld1q_u64(ptr.add(2)))
+        RawGroupImpl(vld1q_u64(ptr), vld1q_u64(ptr.add(2)))
     }
 
     #[inline]
@@ -93,7 +93,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
         let b1 = vextq_u64(group.0, group.1, 1);
         Self::encode(
             output,
-            UnsafeGroupImpl(vsubq_u64(group.0, b0), vsubq_u64(group.1, b1)),
+            RawGroupImpl(vsubq_u64(group.0, b0), vsubq_u64(group.1, b1)),
         )
     }
 
@@ -106,7 +106,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
         let g1 = vqtbl2q_u8(tbl_bytes, shuf2);
         (
             Self::data_len(tag),
-            UnsafeGroupImpl(vreinterpretq_u64_u8(g0), vreinterpretq_u64_u8(g1)),
+            RawGroupImpl(vreinterpretq_u64_u8(g0), vreinterpretq_u64_u8(g1)),
         )
     }
 
@@ -124,12 +124,12 @@ impl UnsafeGroup for UnsafeGroupImpl {
         let b_c = vextq_u64(a_b, c_d, 1);
         let bc_cd = vaddq_u64(b_c, c_d);
         let pabc_pabcd = vaddq_u64(pa_pab, bc_cd);
-        (len, UnsafeGroupImpl(pa_pab, pabc_pabcd))
+        (len, RawGroupImpl(pa_pab, pabc_pabcd))
     }
 
     #[inline]
     fn data_len(tag: u8) -> usize {
-        scalar::UnsafeGroupImpl::data_len(tag)
+        scalar::RawGroupImpl::data_len(tag)
     }
 
     #[inline]
@@ -146,7 +146,7 @@ impl UnsafeGroup for UnsafeGroupImpl {
 }
 
 #[cfg(test)]
-crate::tests::unsafe_group_test_suite!();
+crate::tests::raw_group_test_suite!();
 
 #[cfg(test)]
 crate::tests::compat_test_suite!();

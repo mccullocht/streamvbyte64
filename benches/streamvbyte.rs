@@ -9,7 +9,7 @@ fn generate_array<I: PrimInt>(len: usize, max_bytes: usize) -> Vec<I> {
     assert!(max_bytes <= std::mem::size_of::<I>());
     let seed: &[u8; 32] = &[0xabu8; 32];
     let mut rng = StdRng::from_seed(*seed);
-    let max_val = (0..max_bytes).fold(0u64, |acc, i| acc | (0xffu64 << i * 8));
+    let max_val = (0..max_bytes).fold(0u64, |acc, i| acc | (0xffu64 << (i * 8)));
     let between = Uniform::from(0..=max_val);
     (0..len)
         .map(|_| between.sample(&mut rng))

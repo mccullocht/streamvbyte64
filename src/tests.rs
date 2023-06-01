@@ -1,17 +1,17 @@
-use crate::unsafe_group::UnsafeGroup;
+use crate::raw_group::RawGroup;
 use num_traits::{ops::wrapping::WrappingAdd, One, PrimInt, Zero};
 use rand::distributions::Uniform;
 use rand::prelude::*;
 use std::iter::Iterator;
 
-pub(crate) fn test_tag_len<TGroup: UnsafeGroup>() {
+pub(crate) fn test_tag_len<TGroup: RawGroup>() {
     assert!(TGroup::TAG_LEN
         .iter()
         .zip(TGroup::TAG_LEN.iter().skip(1))
         .all(|(a, b)| *a < *b));
     assert!(TGroup::TAG_LEN
         .iter()
-        .all(|v| *v as usize <= std::mem::size_of::<TGroup::Elem>()));
+        .all(|v| *v <= std::mem::size_of::<TGroup::Elem>()));
 }
 
 /// Represents a single test group for encoding or decoding.
@@ -44,9 +44,7 @@ where
 {
     pub fn new(dist: [usize; 4], masks: [Elem; 4]) -> Self {
         assert!(dist.iter().zip(dist.iter().skip(1)).all(|(a, b)| *a < *b));
-        assert!(dist
-            .iter()
-            .all(|v| *v as usize <= std::mem::size_of::<Elem>()));
+        assert!(dist.iter().all(|v| *v <= std::mem::size_of::<Elem>()));
 
         TagIter {
             tag: 0,
@@ -96,10 +94,10 @@ where
             self.dist[(tag as usize >> 6) & 0x3],
         ];
         let group = [
-            Self::byteval(vlens[0] as usize) & self.masks[0],
-            Self::byteval(vlens[1] as usize) & self.masks[1],
-            Self::byteval(vlens[2] as usize) & self.masks[2],
-            Self::byteval(vlens[3] as usize) & self.masks[3],
+            Self::byteval(vlens[0]) & self.masks[0],
+            Self::byteval(vlens[1]) & self.masks[1],
+            Self::byteval(vlens[2]) & self.masks[2],
+            Self::byteval(vlens[3]) & self.masks[3],
         ];
 
         self.tag += 1;
@@ -111,7 +109,7 @@ where
     }
 }
 
-fn extract_group<TGroup: UnsafeGroup>(group: TGroup) -> [TGroup::Elem; 4] {
+fn extract_group<TGroup: RawGroup>(group: TGroup) -> [TGroup::Elem; 4] {
     let mut buf = [TGroup::Elem::zero(); 4];
     unsafe {
         TGroup::store_unaligned(buf.as_mut_ptr(), group);
@@ -120,9 +118,9 @@ fn extract_group<TGroup: UnsafeGroup>(group: TGroup) -> [TGroup::Elem; 4] {
 }
 
 // Test encoding with EGroup and decoding with DGroup
-pub(crate) fn test_encode_decode<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_encode_decode<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         for test in TagIter::<EGroup::Elem>::new(
@@ -155,18 +153,18 @@ fn integrate_delta<Elem: PrimInt>(base: Elem, delta: [Elem; 4]) -> [Elem; 4] {
 }
 
 // Returns a mask that contains the smallest element of each tag byte length.
-fn smol_mask<TGroup: UnsafeGroup>() -> TGroup::Elem {
+fn smol_mask<TGroup: RawGroup>() -> TGroup::Elem {
     let mut base_mask = TGroup::Elem::one();
     for l in TGroup::TAG_LEN.iter().take(3) {
-        base_mask = base_mask | (TGroup::Elem::one() << (*l as usize * 8));
+        base_mask = base_mask | (TGroup::Elem::one() << (*l * 8));
     }
     base_mask
 }
 
 // Test encoding deltas with EGroup and decoding them with DGroup
-pub(crate) fn test_encode_decode_deltas<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_encode_decode_deltas<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         for test in TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4]) {
@@ -189,9 +187,9 @@ where
 }
 
 // Test encoding deltas with EGroup and skipping them with DGroup.
-pub(crate) fn test_skip_deltas<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_skip_deltas<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         for test in TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4]) {
@@ -213,20 +211,16 @@ where
 }
 
 // Test encoding with EGroup and decoding a superblock with DGroup.
-pub(crate) fn test_decode8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_decode8<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
             .collect::<Vec<_>>();
         for group8 in test_groups.chunks_exact(8) {
             let group_tags = group8.iter().map(|tg| tg.tag).collect::<Vec<_>>();
-            let group_values = group8
-                .iter()
-                .map(|tg| tg.group)
-                .flatten()
-                .collect::<Vec<_>>();
+            let group_values = group8.iter().flat_map(|tg| tg.group).collect::<Vec<_>>();
             let expected_len = group8.iter().map(|tg| tg.data_len).sum::<usize>();
 
             let mut enc = [0u8; 256];
@@ -256,9 +250,9 @@ where
 }
 
 // Test encoding deltas with EGroup and decoding a superblock with DGroup.
-pub(crate) fn test_decode_deltas8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_decode_deltas8<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
@@ -268,8 +262,7 @@ where
             let mut sum = EGroup::Elem::one();
             let group_values = group8
                 .iter()
-                .map(|tg| tg.group)
-                .flatten()
+                .flat_map(|tg| tg.group)
                 .map(|v| {
                     sum = sum + v;
                     sum
@@ -312,9 +305,9 @@ where
 }
 
 // Test encoding deltas with EGroup and skipping a superblock with DGroup.
-pub(crate) fn test_skip_deltas8<EGroup: UnsafeGroup, DGroup: UnsafeGroup>()
+pub(crate) fn test_skip_deltas8<EGroup: RawGroup, DGroup: RawGroup>()
 where
-    <EGroup as UnsafeGroup>::Elem: PartialEq<<DGroup as UnsafeGroup>::Elem>,
+    <EGroup as RawGroup>::Elem: PartialEq<<DGroup as RawGroup>::Elem>,
 {
     unsafe {
         let test_groups = TagIter::<EGroup::Elem>::new(EGroup::TAG_LEN, [smol_mask::<EGroup>(); 4])
@@ -324,8 +317,7 @@ where
             let mut sum = EGroup::Elem::one();
             let group_values = group8
                 .iter()
-                .map(|tg| tg.group)
-                .flatten()
+                .flat_map(|tg| tg.group)
                 .map(|v| {
                     sum = sum + v;
                     sum
@@ -363,62 +355,62 @@ where
     }
 }
 
-/// Define `group_suite` module with conformance tests for `UnsafeGroup` implementations.
-/// Invoke this inside the module defining your `UnsafeGroupImpl`.
-macro_rules! unsafe_group_test_suite {
+/// Define `group_suite` module with conformance tests for `RawGroup` implementations.
+/// Invoke this inside the module defining your `RawGroupImpl`.
+macro_rules! raw_group_test_suite {
     () => {
         #[cfg(test)]
         mod group_suite {
-            use super::UnsafeGroupImpl;
+            use super::RawGroupImpl;
 
             #[test]
             fn tag_len() {
-                crate::tests::test_tag_len::<UnsafeGroupImpl>();
+                crate::tests::test_tag_len::<RawGroupImpl>();
             }
 
             #[test]
             fn encode_decode() {
-                crate::tests::test_encode_decode::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_encode_decode::<RawGroupImpl, RawGroupImpl>();
             }
 
             #[test]
             fn encode_decode_deltas() {
-                crate::tests::test_encode_decode_deltas::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_encode_decode_deltas::<RawGroupImpl, RawGroupImpl>();
             }
 
             #[test]
             fn skip_deltas() {
-                crate::tests::test_skip_deltas::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_skip_deltas::<RawGroupImpl, RawGroupImpl>();
             }
 
             #[test]
             fn decode8() {
-                crate::tests::test_decode8::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_decode8::<RawGroupImpl, RawGroupImpl>();
             }
 
             #[test]
             fn decode_deltas8() {
-                crate::tests::test_decode_deltas8::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_decode_deltas8::<RawGroupImpl, RawGroupImpl>();
             }
 
             #[test]
             fn skip_deltas8() {
-                crate::tests::test_skip_deltas8::<UnsafeGroupImpl, UnsafeGroupImpl>();
+                crate::tests::test_skip_deltas8::<RawGroupImpl, RawGroupImpl>();
             }
         }
     };
 }
 
-pub(crate) use unsafe_group_test_suite;
+pub(crate) use raw_group_test_suite;
 
-/// Define `compat_suite` module that ensures your `UnsafeGroup` implementation is compatible with the scalar implementation.
-/// Invoke this inside the module defining your `UnsafeGroupImpl`.
+/// Define `compat_suite` module that ensures your `RawGroup` implementation is compatible with the scalar implementation.
+/// Invoke this inside the module defining your `RawGroupImpl`.
 macro_rules! compat_test_suite {
     () => {
         #[cfg(test)]
         mod compat_suite {
-            use super::scalar::UnsafeGroupImpl as ScalarGroupImpl;
-            use super::UnsafeGroupImpl as SIMDGroupImpl;
+            use super::scalar::RawGroupImpl as ScalarGroupImpl;
+            use super::RawGroupImpl as SIMDGroupImpl;
 
             // These tests invoke shared test method but vary the encoding and decoding group implementations.
 
@@ -467,7 +459,7 @@ pub(crate) fn generate_array<I: PrimInt>(len: usize, max_bytes: usize) -> Vec<I>
     assert!(max_bytes <= std::mem::size_of::<I>());
     let seed: &[u8; 32] = &[0xabu8; 32];
     let mut rng = StdRng::from_seed(*seed);
-    let max_val = (0..max_bytes).fold(0u64, |acc, i| acc | (0xffu64 << i * 8));
+    let max_val = (0..max_bytes).fold(0u64, |acc, i| acc | (0xffu64 << (i * 8)));
     let between = Uniform::from(0..=max_val);
     (0..len)
         .map(|_| between.sample(&mut rng))

@@ -18,7 +18,7 @@ fn tag_value(v: u64) -> u8 {
     (u32::BITS - t3.leading_zeros()) as u8
 }
 
-crate::unsafe_group::declare_scalar_implementation!(u64, group1248);
+crate::raw_group::declare_scalar_implementation!(u64, group1248);
 
 #[derive(Clone, Copy)]
 enum Impl {
@@ -45,8 +45,8 @@ impl Group64 for Group1248 {
 
     fn encode(&self, values: &[u64], tags: &mut [u8], encoded: &mut [u8]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::encode::<scalar::UnsafeGroupImpl>(values, tags, encoded),
-            Impl::Neon => group_impl::encode::<neon::UnsafeGroupImpl>(values, tags, encoded),
+            Impl::Scalar => group_impl::encode::<scalar::RawGroupImpl>(values, tags, encoded),
+            Impl::Neon => group_impl::encode::<neon::RawGroupImpl>(values, tags, encoded),
         }
     }
 
@@ -59,18 +59,18 @@ impl Group64 for Group1248 {
     ) -> usize {
         match self.0 {
             Impl::Scalar => {
-                group_impl::encode_deltas::<scalar::UnsafeGroupImpl>(initial, values, tags, encoded)
+                group_impl::encode_deltas::<scalar::RawGroupImpl>(initial, values, tags, encoded)
             }
             Impl::Neon => {
-                group_impl::encode_deltas::<neon::UnsafeGroupImpl>(initial, values, tags, encoded)
+                group_impl::encode_deltas::<neon::RawGroupImpl>(initial, values, tags, encoded)
             }
         }
     }
 
     fn decode(&self, tags: &[u8], encoded: &[u8], values: &mut [u64]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::decode::<scalar::UnsafeGroupImpl>(tags, encoded, values),
-            Impl::Neon => group_impl::decode::<neon::UnsafeGroupImpl>(tags, encoded, values),
+            Impl::Scalar => group_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
+            Impl::Neon => group_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
         }
     }
 
@@ -82,20 +82,20 @@ impl Group64 for Group1248 {
         values: &mut [u64],
     ) -> usize {
         // TODO: reenable the neon implementation when performance matches scalar.
-        group_impl::decode_deltas::<scalar::UnsafeGroupImpl>(initial, tags, encoded, values)
+        group_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
     }
 
     fn data_len(&self, tags: &[u8]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::data_len::<scalar::UnsafeGroupImpl>(tags),
-            Impl::Neon => group_impl::data_len::<neon::UnsafeGroupImpl>(tags),
+            Impl::Scalar => group_impl::data_len::<scalar::RawGroupImpl>(tags),
+            Impl::Neon => group_impl::data_len::<neon::RawGroupImpl>(tags),
         }
     }
 
     fn skip_deltas(&self, tags: &[u8], encoded: &[u8]) -> (usize, u64) {
         match self.0 {
-            Impl::Scalar => group_impl::skip_deltas::<scalar::UnsafeGroupImpl>(tags, encoded),
-            Impl::Neon => group_impl::skip_deltas::<neon::UnsafeGroupImpl>(tags, encoded),
+            Impl::Scalar => group_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
+            Impl::Neon => group_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
         }
     }
 }
