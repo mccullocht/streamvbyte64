@@ -1,5 +1,6 @@
 use std::arch::aarch64::{
-    vaddlvq_u8, vandq_u8, vdupq_n_u8, vld1q_u64, vld1q_u8, vqtbl1q_u8, vreinterpretq_u8_u64,
+    uint32x4_t, vaddlvq_u8, vaddq_u32, vandq_u8, vdupq_n_u32, vdupq_n_u8, vextq_u32, vld1q_u64,
+    vld1q_u8, vqtbl1q_u8, vreinterpretq_u8_u64,
 };
 
 /// Generate a table mapping the lower half (nibble) of a tag to the length of those two entries.
@@ -103,3 +104,17 @@ macro_rules! generate_decode_shuffle_table {
 }
 generate_decode_shuffle_table!(tag_decode_shuffle_table32, u32);
 generate_decode_shuffle_table!(tag_decode_shuffle_table64, u64);
+
+/// Compute the running sum values of `deltas` starting at `delta_base`.
+/// Every lane of `delta_base` is expected to contain the same value.
+#[inline(always)]
+pub(crate) unsafe fn sum_deltas32(delta_base: uint32x4_t, deltas: uint32x4_t) -> uint32x4_t {
+    let p = delta_base;
+    let z = vdupq_n_u32(0);
+    let a_b_c_d = deltas;
+    let z_a_b_c = vextq_u32(z, a_b_c_d, 3);
+    let a_ab_bc_cd = vaddq_u32(a_b_c_d, z_a_b_c);
+    let z_z_a_ab = vextq_u32(z, a_ab_bc_cd, 2);
+    let pa_pab_pbc_pbd = vaddq_u32(p, a_ab_bc_cd);
+    vaddq_u32(pa_pab_pbc_pbd, z_z_a_ab)
+}
