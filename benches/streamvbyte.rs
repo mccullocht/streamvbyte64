@@ -1,10 +1,9 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use num_traits::{PrimInt, WrappingAdd};
+use num_traits::{One, PrimInt, WrappingAdd, Zero};
 use rand::distributions::{Uniform, WeightedIndex};
 use rand::prelude::*;
-use std::fmt;
 use std::ops::RangeInclusive;
-use streamvbyte64::{Group0124, Group1234, Group1248, Group32, Group64};
+use streamvbyte64::{Coder, Coder0124, Coder1234, Coder1248};
 
 const ZIPF_WEIGHTS: [usize; 8] = [840, 420, 280, 210, 168, 140, 120, 105];
 const ARRAY_LEN: usize = 1024;
@@ -58,129 +57,102 @@ struct Streams {
     data: Vec<u8>,
 }
 
-struct BenchCase {
-    len: usize,
-    max_bytes: usize,
-}
-
-impl fmt::Display for BenchCase {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "len={}/max_bytes={}", self.len, self.max_bytes)
+fn bm_coder<C: Coder>(name: &str, max_bytes: &[usize], c: &mut Criterion) {
+    fn encoded_stream<C: Coder>(coder: &C, values: &[C::Elem], delta: bool) -> Streams {
+        let (tbytes, dbytes) = C::max_compressed_bytes(values.len());
+        let mut tags = vec![0u8; tbytes];
+        let mut data = vec![0u8; dbytes];
+        let data_len = if delta {
+            coder.encode_deltas(C::Elem::one(), &values, &mut tags, &mut data)
+        } else {
+            coder.encode(&values, &mut tags, &mut data)
+        };
+        data.resize(data_len, 0);
+        data.shrink_to_fit();
+        Streams {
+            len: values.len(),
+            tags,
+            data,
+        }
     }
-}
 
-macro_rules! bm_group_trait {
-    ($bm_fn:ident, $elem_type:ty, $group_trait:path) => {
-        fn $bm_fn<G>(name: &str, max_bytes: &[usize], c: &mut Criterion)
-        where
-            G: $group_trait,
-        {
-            fn encoded_stream<G: $group_trait>(
-                coder: &G,
-                values: &[$elem_type],
-                delta: bool,
-            ) -> Streams {
-                let (tbytes, dbytes) = G::max_compressed_bytes(values.len());
+    let coder = C::new();
+    let mut bm_group = c.benchmark_group(name);
+    bm_group.throughput(Throughput::Elements(ARRAY_LEN as u64));
+    let max_data_len = ARRAY_LEN * std::mem::size_of::<C::Elem>();
+    for max_bytes in max_bytes {
+        let input_values = generate_array(ARRAY_LEN, *max_bytes);
+        bm_group.bench_with_input(
+            BenchmarkId::new("encode", max_bytes),
+            &input_values,
+            |b, v| {
+                let (tbytes, dbytes) = C::max_compressed_bytes(v.len());
                 let mut tags = vec![0u8; tbytes];
                 let mut data = vec![0u8; dbytes];
-                let data_len = if delta {
-                    coder.encode_deltas(1, &values, &mut tags, &mut data)
-                } else {
-                    coder.encode(&values, &mut tags, &mut data)
-                };
-                data.resize(data_len, 0);
-                data.shrink_to_fit();
-                Streams {
-                    len: values.len(),
-                    tags,
-                    data,
-                }
-            }
+                b.iter(|| assert!(coder.encode(&v, &mut tags, &mut data) <= max_data_len))
+            },
+        );
 
-            let coder = G::new();
-            let mut bm_group = c.benchmark_group(name);
-            bm_group.throughput(Throughput::Elements(ARRAY_LEN as u64));
-            let max_data_len = ARRAY_LEN * std::mem::size_of::<$elem_type>();
-            for max_bytes in max_bytes {
-                let input_values = generate_array(ARRAY_LEN, *max_bytes);
-                bm_group.bench_with_input(
-                    BenchmarkId::new("encode", max_bytes),
-                    &input_values,
-                    |b, v| {
-                        let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
-                        let mut tags = vec![0u8; tbytes];
-                        let mut data = vec![0u8; dbytes];
-                        b.iter(|| assert!(coder.encode(&v, &mut tags, &mut data) <= max_data_len))
-                    },
-                );
+        let input_delta_values =
+            generate_cumulative_array::<C::Elem>(ARRAY_LEN, *max_bytes, C::Elem::one());
+        bm_group.bench_with_input(
+            BenchmarkId::new("encode_deltas", max_bytes),
+            &input_delta_values,
+            |b, v| {
+                let (tbytes, dbytes) = C::max_compressed_bytes(v.len());
+                let mut tags = vec![0u8; tbytes];
+                let mut data = vec![0u8; dbytes];
+                b.iter(|| {
+                    assert!(
+                        coder.encode_deltas(C::Elem::one(), &v, &mut tags, &mut data)
+                            <= max_data_len
+                    )
+                })
+            },
+        );
 
-                let input_delta_values = generate_cumulative_array(ARRAY_LEN, *max_bytes, 1);
-                bm_group.bench_with_input(
-                    BenchmarkId::new("encode_deltas", max_bytes),
-                    &input_delta_values,
-                    |b, v| {
-                        let (tbytes, dbytes) = G::max_compressed_bytes(v.len());
-                        let mut tags = vec![0u8; tbytes];
-                        let mut data = vec![0u8; dbytes];
-                        b.iter(|| {
-                            assert!(
-                                coder.encode_deltas(1, &v, &mut tags, &mut data) <= max_data_len
-                            )
-                        })
-                    },
-                );
+        let encoded_streams = encoded_stream(&coder, &input_values, false);
+        bm_group.bench_with_input(
+            BenchmarkId::new("decode", max_bytes),
+            &encoded_streams,
+            |b, s| {
+                let mut values = vec![C::Elem::zero(); s.len];
+                b.iter(|| assert!(coder.decode(&s.tags, &s.data, &mut values) <= max_data_len))
+            },
+        );
+        let encoded_delta_streams = encoded_stream(&coder, &input_delta_values, true);
+        bm_group.bench_with_input(
+            BenchmarkId::new("decode_deltas", max_bytes),
+            &encoded_delta_streams,
+            |b, s| {
+                let mut values = vec![C::Elem::zero(); s.len];
+                b.iter(|| {
+                    assert!(
+                        coder.decode_deltas(C::Elem::one(), &s.tags, &s.data, &mut values)
+                            <= max_data_len
+                    )
+                })
+            },
+        );
+        bm_group.bench_with_input(
+            BenchmarkId::new("skip_deltas", max_bytes),
+            &encoded_delta_streams,
+            |b, s| b.iter(|| assert!(coder.skip_deltas(&s.tags, &s.data).0 <= max_data_len)),
+        );
 
-                let encoded_streams = encoded_stream(&coder, &input_values, false);
-                bm_group.bench_with_input(
-                    BenchmarkId::new("decode", max_bytes),
-                    &encoded_streams,
-                    |b, s| {
-                        let mut values = vec![0; s.len];
-                        b.iter(|| {
-                            assert!(coder.decode(&s.tags, &s.data, &mut values) <= max_data_len)
-                        })
-                    },
-                );
-                let encoded_delta_streams = encoded_stream(&coder, &input_delta_values, true);
-                bm_group.bench_with_input(
-                    BenchmarkId::new("decode_deltas", max_bytes),
-                    &encoded_delta_streams,
-                    |b, s| {
-                        let mut values = vec![0; s.len];
-                        b.iter(|| {
-                            assert!(
-                                coder.decode_deltas(1, &s.tags, &s.data, &mut values)
-                                    <= max_data_len
-                            )
-                        })
-                    },
-                );
-                bm_group.bench_with_input(
-                    BenchmarkId::new("skip_deltas", max_bytes),
-                    &encoded_delta_streams,
-                    |b, s| {
-                        b.iter(|| assert!(coder.skip_deltas(&s.tags, &s.data).0 <= max_data_len))
-                    },
-                );
-
-                bm_group.bench_with_input(
-                    BenchmarkId::new("data_len", max_bytes),
-                    &encoded_streams,
-                    |b, s| b.iter(|| assert!(coder.data_len(&s.tags) <= max_data_len)),
-                );
-            }
-            bm_group.finish();
-        }
-    };
+        bm_group.bench_with_input(
+            BenchmarkId::new("data_len", max_bytes),
+            &encoded_streams,
+            |b, s| b.iter(|| assert!(coder.data_len(&s.tags) <= max_data_len)),
+        );
+    }
+    bm_group.finish();
 }
 
-bm_group_trait!(bm_group32, u32, Group32);
-bm_group_trait!(bm_group64, u64, Group64);
-
 fn benchmark(c: &mut Criterion) {
-    bm_group32::<Group1234>("Group1234", &[1, 2, 4], c);
-    bm_group32::<Group0124>("Group0124", &[1, 2, 4], c);
-    bm_group64::<Group1248>("Group1248", &[1, 4, 8], c);
+    bm_coder::<Coder1234>("Coder1234", &[1, 2, 4], c);
+    bm_coder::<Coder0124>("Coder0124", &[1, 2, 4], c);
+    bm_coder::<Coder1248>("Coder1248", &[1, 4, 8], c);
 }
 
 criterion_group!(benches, benchmark);

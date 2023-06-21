@@ -481,13 +481,12 @@ pub(crate) fn generate_cumulative_array<I: PrimInt + WrappingAdd>(
     values
 }
 
-macro_rules! group_test_suite {
-    ($group_trait:ident, $group_impl:ident, $coding_descriptor:ident) => {
+macro_rules! coder_test_suite {
+    ($group_impl:ident, $coding_descriptor:ident) => {
         #[cfg(test)]
-        mod group_suite {
-            use crate::$group_trait;
+        mod coder_suite {
+            use crate::{coding_descriptor::CodingDescriptor, Coder};
             use crate::$group_impl;
-            use crate::coding_descriptor::CodingDescriptor;
             use super::$coding_descriptor;
 
             use crate::tests::{generate_array, generate_cumulative_array};
@@ -574,4 +573,4 @@ macro_rules! group_test_suite {
     }
 }
 
-pub(crate) use group_test_suite;
+pub(crate) use coder_test_suite;

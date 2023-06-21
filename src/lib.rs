@@ -1,25 +1,26 @@
 /*! # Fast Byte-Aligned Integer Coding
-This crate is a Rust port of [Daniel Lemire's `streamvbyte` library](https://github.com/lemire/streamvbyte). It contains
-multiple implementations of this format aimed at different value distributions and integer sizes.
+This crate is a Rust port of [Daniel Lemire's `streamvbyte` library](https://github.com/lemire/streamvbyte).
+It contains multiple implementations of this format aimed at different integer sizes and value distributions.
 
-Each `Group32` or `Group64` implementation produces different formats that are incompatible with one another. Implementations
-will be SIMD accelerate if:
+Each `Coder` implementation produces different formats that are incompatible with one another.
+Implementations will be SIMD accelerate if:
 * an implementation has been written for your architecture target
 * the CPU being used supports the necessary instructions.
 
-At the moment group implementations only have acceleration on little-endian `aarch64` targets with `NEON` instruction support.
+At the moment group implementations only have acceleration on little-endian `aarch64` targets with
+`NEON` instruction support.
 
 ## Example without delta-coding
 
 ```
-use streamvbyte64::{Group32, Group1234};
+use streamvbyte64::{Coder, Coder1234};
 
-let coder = Group1234::new();
+let coder = Coder1234::new();
 let values = vec![
     0u32, 128, 256, 1024, 70, 36, 1000000,
     378, 45, 888, 26, 262144, 88, 89, 90, 16777216
 ];
-let (tag_len, data_len) = Group1234::max_compressed_bytes(values.len());
+let (tag_len, data_len) = Coder1234::max_compressed_bytes(values.len());
 let mut encoded = vec![0u8; tag_len + data_len];
 let (tags, data) = encoded.split_at_mut(tag_len);
 // This is the number of bytes in data actually used. If you're writing the encoded data
@@ -40,9 +41,9 @@ assert_eq!(values[11], group[3]);
 ## Example with delta coding
 
 ```
-use streamvbyte64::{Group32, Group1234};
+use streamvbyte64::{Coder, Coder1234};
 
-let coder = Group1234::new();
+let coder = Coder1234::new();
 let mut sum = 0u32;
 let values = [
     0u32, 128, 256, 1024, 70, 36, 1000000,
@@ -51,7 +52,7 @@ let values = [
     sum += x;
     sum
 }).collect::<Vec<_>>();
-let (tag_len, data_len) = Group1234::max_compressed_bytes(values.len());
+let (tag_len, data_len) = Coder1234::max_compressed_bytes(values.len());
 let mut encoded = vec![0u8; tag_len + data_len];
 let (tags, data) = encoded.split_at_mut(tag_len);
 let nodelta_data_len = coder.encode(&values, tags, data);
@@ -77,21 +78,33 @@ assert_eq!(values[11], group[3]);
 */
 
 mod arch;
+mod coder_impl;
 mod coding_descriptor;
-mod group_impl;
 mod raw_group;
 mod tag_utils;
 
-// TODO: add a GroupTag trait that is shared with RawGroup, it would be useful for testing.
+mod coder0124;
+mod coder1234;
+mod coder1248;
 
-/// `Group32` compresses and decompresses groups of 4 32-bit integers together in a byte-aligned format.
-/// Different `Group32` implementations may support different byte length distributions.
+pub use num_traits::{ops::wrapping::WrappingAdd, ops::wrapping::WrappingSub, PrimInt};
+
+/// `Coder` compresses and decompresses integers in a byte-aligned format compose of two streams.
 ///
-/// Groups are coded into two separate streams: a tag stream where each byte describes the contents of a group, and a
-/// data stream containing values as described by the tag. Use `max_compressed_bytes()` to compute the number of tag
-/// and data bytes that must be allocated to safely encode a slice of input values.
-pub trait Group32: Sized + Copy + Clone {
-    /// Create a new Group32 coder, selecting the fastest implementation available (ideally SIMD accelerated).
+/// Groups of 4 integers are coded into two separate streams: a tag stream where each byte describes
+/// a group, and a data stream containing values as described by the tag. The coder _does not_
+/// record the number of entries in the stream, instead assuming a multiple of 4.
+///
+/// Different coder implementations support different integer widths (32 or 64 bit) as well as
+/// different byte length distributions to better compress some data sets.
+///
+/// Use `max_compressed_bytes()` to compute the number of tag and data bytes that must be allocated
+/// to safely encode a slice of input values.
+pub trait Coder: Sized + Copy + Clone {
+    /// The input/output element type for this coder, typically `u32` or `u64`.
+    type Elem: PrimInt + WrappingAdd + WrappingSub + std::fmt::Debug + Sized + Copy + Clone;
+
+    /// Create a new `Coder`, selecting the fastest implementation available.
     ///
     /// These objects should be relatively cheap to create and require no heap allocation.
     fn new() -> Self;
@@ -99,12 +112,16 @@ pub trait Group32: Sized + Copy + Clone {
     /// Returns the number of `(tag_bytes, data_bytes)` required to compress a slice of length `len`.
     fn max_compressed_bytes(len: usize) -> (usize, usize) {
         let num_groups = (len + 3) / 4;
-        (num_groups, num_groups * 4 * std::mem::size_of::<u32>())
+        (
+            num_groups,
+            num_groups * 4 * std::mem::size_of::<Self::Elem>(),
+        )
     }
 
     /// Encodes a slice of values, writing tags and data to separate streams.
     ///
-    /// For every 4 input values, one tag byte and up to 16 data bytes may be written to the output streams.
+    /// For every 4 input values one tag byte and up to `std::mem::size_of::<Elem>() * 4` data bytes
+    /// may be written to output.
     ///
     /// Returns the number of bytes written to the data stream.
     ///
@@ -112,102 +129,15 @@ pub trait Group32: Sized + Copy + Clone {
     ///
     /// - If `values.len() % 4 != 0`
     /// - If `tags` or `data` are too small to fit all of the output data.
-    fn encode(&self, values: &[u32], tags: &mut [u8], data: &mut [u8]) -> usize;
-
-    /// Encodes a slice of values, writing tags and data to separate streams. Values are interpreted as deltas starting from `initial`
-    /// which produces a more compact output that is also more expensive to encode and decode.
-    ///
-    /// For every 4 input values, one tag byte and up to 16 data bytes may be written to the output streams.
-    /// Returns the number of bytes written to the data stream.
-    ///
-    /// # Panics
-    ///
-    /// - If `values.len() % 4 != 0`
-    /// - If `tags` or `data` are too small to fit all of the output data.
-    fn encode_deltas(
-        &self,
-        initial: u32,
-        values: &[u32],
-        tags: &mut [u8],
-        data: &mut [u8],
-    ) -> usize;
-
-    /// Decodes input tag and data streams to an output slice.
-    ///
-    /// Returns the number of bytes consumed from the data stream, and one tag byte is consumed for every 4 values decoded.
-    ///
-    /// # Panics
-    ///
-    /// - If `values.len() % 4 != 0`.
-    /// - If `tags.len() < values.len() / 4`.
-    /// - If decoding would consume bytes past the end of `data`.
-    fn decode(&self, tags: &[u8], data: &[u8], values: &mut [u32]) -> usize;
-
-    /// Decodes input tag and data streams to an output slice. Values are interepreted as deltas starting from `initial`.
-    ///
-    /// Returns the number of bytes consumed from the data stream, and one tag byte is consumed for every 4 values decoded.
-    ///
-    /// # Panics
-    ///
-    /// - If `values.len() % 4 != 0`.
-    /// - If `tags.len() < values.len() / 4`.
-    /// - If decoding would consume bytes past the end of `data`.
-    fn decode_deltas(&self, initial: u32, tags: &[u8], data: &[u8], values: &mut [u32]) -> usize;
-
-    /// Returns the data length of all the groups encoded by `tags`.
-    fn data_len(&self, tags: &[u8]) -> usize;
-
-    /// Skip `tags.len() * 4` deltas read from input tag and data streams.
-    ///
-    /// Returns the number of bytes consume from the data stream and the sum of all the deltas that were skipped.
-    ///
-    /// # Panics
-    ///
-    ///  - If decoding would consume bytes past the end of `data`.
-    fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, u32);
-}
-
-mod group1234;
-pub use group1234::Group1234;
-
-mod group0124;
-pub use group0124::Group0124;
-
-/// `Group64` compresses and decompresses groups of 4 64-bit integers together in a byte-aligned format.
-/// Different `Group64` implementations may support different byte length distributions.
-///
-/// Groups are coded into two separate streams: a tag stream where each byte describes the contents of a group, and a
-/// data stream containing values as described by the tag. Use `max_compressed_bytes()` to compute the number of tag
-/// and data bytes that must be allocated to safely encode a slice of input values.
-pub trait Group64: Sized + Copy + Clone {
-    /// Create a new Group64 coder, selecting the fastest implementation available (ideally SIMD accelerated).
-    ///
-    /// These objects should be relatively cheap to create and require no heap allocation.
-    fn new() -> Self;
-
-    /// Returns the number of `(tag_bytes, data_bytes)` required to compress a slice of length `len`.
-    fn max_compressed_bytes(len: usize) -> (usize, usize) {
-        let num_groups = (len + 3) / 4;
-        (num_groups, num_groups * 4 * std::mem::size_of::<u64>())
-    }
+    fn encode(&self, values: &[Self::Elem], tags: &mut [u8], data: &mut [u8]) -> usize;
 
     /// Encodes a slice of values, writing tags and data to separate streams.
     ///
-    /// For every 4 input values, one tag byte and up to 32 data bytes may be written to the output streams.
+    /// Values are interpreted as deltas starting from `initial` which produces a more compact
+    /// output that is also more expensive to encode and decode.
     ///
-    /// Returns the number of bytes written to the data stream.
-    ///
-    /// # Panics
-    ///
-    /// - If `values.len() % 4 != 0`
-    /// - If `tags` or `data` are too small to fit all of the output data.
-    fn encode(&self, values: &[u64], tags: &mut [u8], data: &mut [u8]) -> usize;
-
-    /// Encodes a slice of values, writing tags and data to separate streams.
-    /// Values are interpreted as deltas starting from `initial` which produces a more compact output that is also more
-    /// expensive to encode and decode.
-    ///
-    /// For every 4 input values, one tag byte and up to 32 data bytes may be written to the output streams.
+    /// For every 4 input values one tag byte and up to `std::mem::size_of::<Elem>() * 4` data bytes
+    /// may be written to output.
     ///
     /// Returns the number of bytes written to the data stream.
     ///
@@ -217,49 +147,65 @@ pub trait Group64: Sized + Copy + Clone {
     /// - If `tags` or `data` are too small to fit all of the output data.
     fn encode_deltas(
         &self,
-        initial: u64,
-        values: &[u64],
+        initial: Self::Elem,
+        values: &[Self::Elem],
         tags: &mut [u8],
         data: &mut [u8],
     ) -> usize;
 
-    /// Decodes input tag and data streams to an output slice.
+    /// Decodes input tags and data streams to an output slice.
     ///
-    /// Returns the number of bytes consumed from the data stream, and one tag byte is consumed for every 4 values decoded.
+    /// Consumes all tag values in the input stream to produce `tags.len() * 4` values. May consume
+    /// up to `std::mem::size_of<Elem>() * tags.len() * 4` bytes from data.
+    ///
+    /// Returns the number of bytes consumed from the data stream.
     ///
     /// # Panics
     ///
     /// - If `values.len() % 4 != 0`.
     /// - If `tags.len() < values.len() / 4`.
     /// - If decoding would consume bytes past the end of `data`.
-    fn decode(&self, tags: &[u8], data: &[u8], values: &mut [u64]) -> usize;
+    fn decode(&self, tags: &[u8], data: &[u8], values: &mut [Self::Elem]) -> usize;
 
-    /// Decodes input tag and data streams to an output slice. Values are interepreted as deltas starting from `initial`.
+    /// Decodes input tags and data streams to an output slice.
     ///
-    /// Returns the number of bytes consumed from the data stream, and one tag byte is consumed for every 4 values decoded.
+    /// Values are interepreted as deltas starting from `initial`.
+    ///
+    /// Consumes all tag values in the input stream to produce `tags.len() * 4` values. May consume
+    /// up to `std::mem::size_of<Elem>() * tags.len() * 4` bytes from data.
+    ///
+    /// Returns the number of bytes consumed from the data stream.
     ///
     /// # Panics
     ///
     /// - If `values.len() % 4 != 0`.
     /// - If `tags.len() < values.len() / 4`.
     /// - If decoding would consume bytes past the end of `data`.
-    fn decode_deltas(&self, initial: u64, tags: &[u8], data: &[u8], values: &mut [u64]) -> usize;
+    fn decode_deltas(
+        &self,
+        initial: Self::Elem,
+        tags: &[u8],
+        data: &[u8],
+        values: &mut [Self::Elem],
+    ) -> usize;
 
     /// Returns the data length of all the groups encoded by `tags`.
     fn data_len(&self, tags: &[u8]) -> usize;
 
     /// Skip `tags.len() * 4` deltas read from input tag and data streams.
     ///
-    /// Returns the number of bytes consume from the data stream and the sum of all the deltas that were skipped.
+    /// Returns the number of bytes consumed from the data stream and the sum of all the deltas that
+    /// were skipped.
     ///
     /// # Panics
     ///
     ///  - If decoding would consume bytes past the end of `data`.
-    fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, u64);
+    fn skip_deltas(&self, tags: &[u8], data: &[u8]) -> (usize, Self::Elem);
 }
 
-mod group1248;
-pub use group1248::Group1248;
+pub use coder0124::Coder0124;
+pub use coder1234::Coder1234;
+pub use coder1248::Coder1248;
 
 #[cfg(test)]
 pub(crate) mod tests;

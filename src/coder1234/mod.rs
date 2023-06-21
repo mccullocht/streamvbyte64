@@ -1,9 +1,9 @@
 #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
 mod neon;
 
+use crate::coder_impl;
 use crate::coding_descriptor::CodingDescriptor;
-use crate::group_impl;
-use crate::Group32;
+use crate::Coder;
 
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct CodingDescriptor1234;
@@ -42,33 +42,30 @@ enum Impl {
     Neon,
 }
 
-/// `Group1234` packs groups of 4 32-bit integers into lengths of 1, 2, 3, or 4 bytes.
+/// `Coder1234` packs 32-bit integers into lengths of 1, 2, 3, or 4 bytes.
+///
 /// This implementation has acceleration support on little-endian `aarch64` targets using `NEON` instructions.
 #[derive(Clone, Copy)]
-pub struct Group1234(Impl);
+pub struct Coder1234(Impl);
 
-impl Group1234 {
-    fn scalar_impl() -> Self {
-        Group1234(Impl::Scalar)
-    }
-}
+impl Coder for Coder1234 {
+    type Elem = u32;
 
-impl Group32 for Group1234 {
     fn new() -> Self {
         #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
         {
             if std::arch::is_aarch64_feature_detected!("neon") {
-                return Group1234(Impl::Neon);
+                return Coder1234(Impl::Neon);
             }
         }
-        Self::scalar_impl()
+        Coder1234(Impl::Scalar)
     }
 
     fn encode(&self, values: &[u32], tags: &mut [u8], encoded: &mut [u8]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::encode::<scalar::RawGroupImpl>(values, tags, encoded),
+            Impl::Scalar => coder_impl::encode::<scalar::RawGroupImpl>(values, tags, encoded),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-            Impl::Neon => group_impl::encode::<neon::RawGroupImpl>(values, tags, encoded),
+            Impl::Neon => coder_impl::encode::<neon::RawGroupImpl>(values, tags, encoded),
         }
     }
 
@@ -81,20 +78,20 @@ impl Group32 for Group1234 {
     ) -> usize {
         match self.0 {
             Impl::Scalar => {
-                group_impl::encode_deltas::<scalar::RawGroupImpl>(initial, values, tags, encoded)
+                coder_impl::encode_deltas::<scalar::RawGroupImpl>(initial, values, tags, encoded)
             }
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => {
-                group_impl::encode_deltas::<neon::RawGroupImpl>(initial, values, tags, encoded)
+                coder_impl::encode_deltas::<neon::RawGroupImpl>(initial, values, tags, encoded)
             }
         }
     }
 
     fn decode(&self, tags: &[u8], encoded: &[u8], values: &mut [u32]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
+            Impl::Scalar => coder_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-            Impl::Neon => group_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
+            Impl::Neon => coder_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
         }
     }
 
@@ -107,31 +104,31 @@ impl Group32 for Group1234 {
     ) -> usize {
         match self.0 {
             Impl::Scalar => {
-                group_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
+                coder_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
             }
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => {
-                group_impl::decode_deltas::<neon::RawGroupImpl>(initial, tags, encoded, values)
+                coder_impl::decode_deltas::<neon::RawGroupImpl>(initial, tags, encoded, values)
             }
         }
     }
 
     fn data_len(&self, tags: &[u8]) -> usize {
         match self.0 {
-            Impl::Scalar => group_impl::data_len::<scalar::RawGroupImpl>(tags),
+            Impl::Scalar => coder_impl::data_len::<scalar::RawGroupImpl>(tags),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-            Impl::Neon => group_impl::data_len::<neon::RawGroupImpl>(tags),
+            Impl::Neon => coder_impl::data_len::<neon::RawGroupImpl>(tags),
         }
     }
 
     fn skip_deltas(&self, tags: &[u8], encoded: &[u8]) -> (usize, u32) {
         match self.0 {
-            Impl::Scalar => group_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
+            Impl::Scalar => coder_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
-            Impl::Neon => group_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
+            Impl::Neon => coder_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
         }
     }
 }
 
 #[cfg(test)]
-crate::tests::group_test_suite!(Group32, Group1234, CodingDescriptor1234);
+crate::tests::coder_test_suite!(Coder1234, CodingDescriptor1234);
