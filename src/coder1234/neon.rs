@@ -187,28 +187,19 @@ impl RawGroup for RawGroupImpl {
             }
         }
 
-        // Arrange computation to minimize data dependencies between groups to improve instruction
-        // level parallelism:
-        // * Compute offsets before decoding like in decode8().
-        // * Compute base values for each group before computing running sum.
-        let (offsets8, data_len) = tag8_offsets(tag8);
+        // Decode each group and compute its delta base value, then performing running sums within
+        // each group. This allows for parallelism between groups.
         let tags = tag8.to_le_bytes();
-        let offsets = offsets8.to_le_bytes();
-        let deltas = [
-            Self::decode(input, tags[0]).1 .0,
-            Self::decode(input.add(offsets[1] as usize), tags[1]).1 .0,
-            Self::decode(input.add(offsets[2] as usize), tags[2]).1 .0,
-            Self::decode(input.add(offsets[3] as usize), tags[3]).1 .0,
-            Self::decode(input.add(offsets[4] as usize), tags[4]).1 .0,
-            Self::decode(input.add(offsets[5] as usize), tags[5]).1 .0,
-            Self::decode(input.add(offsets[6] as usize), tags[6]).1 .0,
-            Self::decode(input.add(offsets[7] as usize), tags[7]).1 .0,
-        ];
-        let mut bases = [0u32; 8];
+        let mut deltas = [vdupq_n_u32(0); 8];
+        let mut bases = [0u32; 9];
         bases[0] = vgetq_lane_u32::<3>(base.0);
+        let mut offset = 0usize;
         unroll! {
-            for i in 0..7 {
-                bases[i + 1] = bases[i].wrapping_add(vaddvq_u32(deltas[i]));
+            for i in 0..8 {
+                let (len, group) = Self::decode(input.add(offset), tags[i]);
+                bases[i + 1] = bases[i].wrapping_add(vaddvq_u32(group.0));
+                deltas[i] = group.0;
+                offset += len;
             }
         }
         unroll! {
@@ -216,7 +207,7 @@ impl RawGroup for RawGroupImpl {
                 let group_data = sum_deltas32(vdupq_n_u32(bases[i]), deltas[i]);
                 vst1q_u32(output.add(i * 4), group_data);
                 if i == 7 {
-                    return (data_len, RawGroupImpl(group_data));
+                    return (offset, RawGroupImpl(group_data));
                 }
             }
         }

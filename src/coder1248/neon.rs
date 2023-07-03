@@ -1,54 +1,75 @@
+use crunchy::unroll;
+
 use super::{scalar, CodingDescriptor1248};
 use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffle_table64};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
-    uint64x2_t, uint8x16x2_t, uint8x16x4_t, vaddq_u64, vaddvq_u32, vcgtq_u32, vcgtq_u64,
-    vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vdupq_n_u8, vextq_u64, vld1q_s32, vld1q_u64,
-    vld1q_u8, vminq_u8, vpaddd_u64, vpaddlq_u16, vpaddlq_u8, vqmovn_high_u64, vqmovn_u64,
-    vqtbl2q_u8, vqtbl4q_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u32, vreinterpretq_u8_u64,
-    vshlq_u32, vst1q_u64, vst1q_u8, vsubq_u64,
+    uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddlvq_u32, vaddq_u32, vaddq_u64,
+    vaddvq_u32, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u64, vld1q_s32,
+    vld1q_u64, vld1q_u8, vmovn_high_u64, vmovn_u64, vpaddd_u64, vqmovn_high_u64, vqmovn_u64,
+    vqtbl1q_u8, vqtbl2q_u8, vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8,
+    vreinterpretq_u64_u8, vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32,
+    vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
 const DECODE_TABLE: [[u8; 32]; 256] = tag_decode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
 
+/// Load a single 32-byte entry from table based on tag.
+#[inline(always)]
+unsafe fn load_shuffle(table: &[[u8; 32]; 256], tag: u8) -> (uint8x16_t, uint8x16_t) {
+    let ptr = table[tag as usize].as_ptr();
+    (vld1q_u8(ptr), vld1q_u8(ptr.add(16)))
+}
+
+/// Load a single 32-byte decode shuffle table entry based on tag, then narrow it to a 16-byte value.
+/// Only use this if tag is set such that there are no 8-byte entries -- in this case it is valid
+/// to shuffle into 4 32-bit entries in 1 register rather than 4 64-bit entries in 2 registers.
+#[inline(always)]
+unsafe fn load_decode_shuffle_narrow(tag: u8) -> uint8x16_t {
+    let wshuf = load_shuffle(&DECODE_TABLE, tag);
+    vreinterpretq_u8_u32(vmovn_high_u64(
+        vmovn_u64(vreinterpretq_u64_u8(wshuf.0)),
+        vreinterpretq_u64_u8(wshuf.1),
+    ))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(uint64x2_t, uint64x2_t);
 
 impl RawGroupImpl {
-    #[inline]
-    unsafe fn compute_tag(group: Self) -> u8 {
-        // Perform a saturating narrow of the group values to get a smaller vector for comparison.
-        let lo = vqmovn_high_u64(vqmovn_u64(group.0), group.1);
-        // Compute comparisons with the maximum value for tags [1,2,3].
-        let tag3_v0 = vcgtq_u64(group.0, vdupq_n_u64(0xffffffff));
-        let tag3_v1 = vcgtq_u64(group.1, vdupq_n_u64(0xffffffff));
-        let tag2 = vcgtq_u32(lo, vdupq_n_u32(0xffff));
-        let tag1 = vcgtq_u32(lo, vdupq_n_u32(0xff));
-        // Shuffle comparison result bytes together into a single vector where each set value represents
-        // the result of a comparison.
-        let shuf = vld1q_u8(
-            [
-                255, 0, 16, 32, 255, 4, 20, 40, 255, 8, 24, 48, 255, 12, 28, 56,
-            ]
-            .as_ptr(),
+    #[inline(always)]
+    unsafe fn compute_tag(&self) -> (u8, usize) {
+        // NEON does not provide clz on 64 bit lanes. Split each entry into hi and lo 32 bits values
+        // (produce lo by saturating narrow), clz and sum to help compute the values.
+        let lo = vqmovn_high_u64(vqmovn_u64(self.0), self.1);
+        let hi = vuzp2q_u32(vreinterpretq_u32_u64(self.0), vreinterpretq_u32_u64(self.1));
+        let clz_bytes = vshrq_n_u32(vaddq_u32(vclzq_u32(lo), vclzq_u32(hi)), 3);
+        let value_tags = vqtbl1q_u8(
+            vld1q_u8([3, 3, 3, 3, 2, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0].as_ptr()),
+            vreinterpretq_u8_u32(clz_bytes),
         );
-        let tag_bytes = vqtbl4q_u8(
-            uint8x16x4_t(
-                vreinterpretq_u8_u32(tag1),
-                vreinterpretq_u8_u32(tag2),
-                vreinterpretq_u8_u64(tag3_v0),
-                vreinterpretq_u8_u64(tag3_v1),
-            ),
-            shuf,
-        );
-        // Reduce each comparison result to 0 or 1, then sum pairwise to compute tags for each value.
-        let tag_quads = vminq_u8(tag_bytes, vdupq_n_u8(1));
-        let tag_halves = vpaddlq_u8(tag_quads);
-        let tags = vpaddlq_u16(tag_halves);
-        // Shift the tag values and sum across vector to produce a single u8 value.
-        vaddvq_u32(vshlq_u32(tags, vld1q_s32([0, 2, 4, 6].as_ptr()))) as u8
+        let tag = vaddvq_u32(vshlq_u32(
+            vreinterpretq_u32_u8(value_tags),
+            vld1q_s32([0, 2, 4, 6].as_ptr()),
+        )) as u8;
+        let written =
+            vaddvq_u32(vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u8(value_tags))) as usize;
+        (tag, written)
+    }
+
+    #[inline(always)]
+    fn has_any_tag3(tag8: u64) -> bool {
+        (tag8 & 0x5555555555555555 & (tag8 >> 1)) > 0
+    }
+
+    #[inline(always)]
+    unsafe fn decode32(input: *const u8, tag: u8) -> (usize, uint32x4_t) {
+        (
+            Self::data_len(tag),
+            vreinterpretq_u32_u8(vqtbl1q_u8(vld1q_u8(input), load_decode_shuffle_narrow(tag))),
+        )
     }
 }
 
@@ -77,15 +98,13 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        let tag = Self::compute_tag(group);
-        let shuf1 = vld1q_u8(ENCODE_TABLE[tag as usize].as_ptr());
-        let shuf2 = vld1q_u8(ENCODE_TABLE[tag as usize].as_ptr().add(16));
+        let (tag, written) = group.compute_tag();
+        let shuf = load_shuffle(&ENCODE_TABLE, tag);
         let tbl_bytes = uint8x16x2_t(vreinterpretq_u8_u64(group.0), vreinterpretq_u8_u64(group.1));
-        let out1 = vqtbl2q_u8(tbl_bytes, shuf1);
-        let out2 = vqtbl2q_u8(tbl_bytes, shuf2);
-        vst1q_u8(output, out1);
-        vst1q_u8(output.add(16), out2);
-        (tag, Self::data_len(tag))
+        let out = (vqtbl2q_u8(tbl_bytes, shuf.0), vqtbl2q_u8(tbl_bytes, shuf.1));
+        vst1q_u8(output, out.0);
+        vst1q_u8(output.add(16), out.1);
+        (tag, written)
     }
 
     #[inline]
@@ -100,23 +119,21 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn decode(input: *const u8, tag: u8) -> (usize, Self) {
-        let shuf1 = vld1q_u8(DECODE_TABLE[tag as usize].as_ptr());
-        let shuf2 = vld1q_u8(DECODE_TABLE[tag as usize].as_ptr().add(16));
+        let shuf = load_shuffle(&DECODE_TABLE, tag);
         let tbl_bytes = uint8x16x2_t(vld1q_u8(input), vld1q_u8(input.add(16)));
-        let g0 = vqtbl2q_u8(tbl_bytes, shuf1);
-        let g1 = vqtbl2q_u8(tbl_bytes, shuf2);
+        let group_data = (vqtbl2q_u8(tbl_bytes, shuf.0), vqtbl2q_u8(tbl_bytes, shuf.1));
         (
             Self::data_len(tag),
-            RawGroupImpl(vreinterpretq_u64_u8(g0), vreinterpretq_u64_u8(g1)),
+            RawGroupImpl(
+                vreinterpretq_u64_u8(group_data.0),
+                vreinterpretq_u64_u8(group_data.1),
+            ),
         )
     }
 
     #[inline]
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
-        let (len, group) = Self::decode(input, tag);
-        // lol this is -35% throughput
-        let a_b = group.0;
-        let c_d = group.1;
+        let (len, Self(a_b, c_d)) = Self::decode(input, tag);
         let z = vdupq_n_u64(0);
         let z_a = vextq_u64(z, a_b, 1);
         let a_ab = vaddq_u64(z_a, a_b);
@@ -143,6 +160,25 @@ impl RawGroup for RawGroupImpl {
     #[inline]
     fn data_len8(tag8: u64) -> usize {
         data_len8(Self::TAG_LEN, tag8)
+    }
+
+    #[inline]
+    unsafe fn skip_deltas8(input: *const u8, tag8: u64) -> (usize, Self::Elem) {
+        if Self::has_any_tag3(tag8) {
+            return crate::raw_group::default_skip_deltas8::<Self>(input, tag8);
+        }
+
+        let tags = tag8.to_le_bytes();
+        let mut offset = 0usize;
+        let mut sum = 0u64;
+        unroll! {
+            for i in 0..8 {
+                let (len, deltas) = Self::decode32(input.add(offset), tags[i]);
+                offset += len;
+                sum = sum.wrapping_add(vaddlvq_u32(deltas));
+            }
+        }
+        (offset, sum)
     }
 }
 
