@@ -5,12 +5,13 @@ use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffl
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
-    uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddlvq_u32, vaddq_u32, vaddq_u64,
-    vaddvq_u32, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u64, vld1q_s32,
-    vld1q_u64, vld1q_u8, vmovn_high_u64, vmovn_u64, vpaddd_u64, vqmovn_high_u64, vqmovn_u64,
-    vqtbl1q_u8, vqtbl2q_u8, vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8,
-    vreinterpretq_u64_u8, vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32,
-    vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
+    uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddl_high_u32, vaddl_u32, vaddlvq_u32,
+    vaddq_u32, vaddq_u64, vaddvq_u32, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64,
+    vextq_u32, vextq_u64, vget_low_u32, vgetq_lane_u64, vld1q_s32, vld1q_u64, vld1q_u8,
+    vmovn_high_u64, vmovn_u64, vpaddd_u64, vqmovn_high_u64, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8,
+    vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8,
+    vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32, vst1q_u64, vst1q_u8,
+    vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
@@ -160,6 +161,50 @@ impl RawGroup for RawGroupImpl {
     #[inline]
     fn data_len8(tag8: u64) -> usize {
         data_len8(Self::TAG_LEN, tag8)
+    }
+
+    #[inline]
+    unsafe fn decode_deltas8(
+        input: *const u8,
+        tag8: u64,
+        base: Self,
+        output: *mut Self::Elem,
+    ) -> (usize, Self) {
+        if Self::has_any_tag3(tag8) {
+            return crate::raw_group::default_decode_deltas8(input, tag8, base, output);
+        }
+
+        let tags = tag8.to_le_bytes();
+        let mut deltas = [vdupq_n_u32(0); 8];
+        let mut bases = [0u64; 9];
+        bases[0] = vgetq_lane_u64::<1>(base.1);
+        let mut offset = 0usize;
+        unroll! {
+            for i in 0..8 {
+                let (len, delta) = Self::decode32(input.add(offset), tags[i]);
+                deltas[i] = delta;
+                bases[i + 1] = bases[i] + vaddlvq_u32(delta);
+                offset += len;
+            }
+        }
+        let z = vdupq_n_u32(0);
+        unroll! {
+            for i in 0..8 {
+                let p = vdupq_n_u64(bases[i]);
+                let a_b_c_d = deltas[i];
+                let z_a_b_c = vextq_u32(z, a_b_c_d, 3);
+                let a_ab = vaddl_u32(vget_low_u32(z_a_b_c), vget_low_u32(a_b_c_d));
+                let bc_cd = vaddl_high_u32(z_a_b_c, a_b_c_d);
+                let pa_pab = vaddq_u64(p, a_ab);
+                let group = Self(pa_pab, vaddq_u64(pa_pab, bc_cd));
+                Self::store_unaligned(output.add(i * 4), group);
+                if i == 7 {
+                    return (offset, group);
+                }
+            }
+        }
+
+        unreachable!()
     }
 
     #[inline]
