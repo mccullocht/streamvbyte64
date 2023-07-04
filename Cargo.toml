@@ -1,6 +1,6 @@
 [package]
 name = "streamvbyte64"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Trevor McCulloch <mccullocht@gmail.com>"]
 description = "Implementation of stream-vbyte codec supporting 64-bit wide values"
