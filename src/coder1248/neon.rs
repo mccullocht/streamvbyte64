@@ -6,11 +6,12 @@ use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddl_high_u32, vaddl_u32, vaddlvq_u32,
-    vaddq_u32, vaddq_u64, vaddvq_u32, vaddvq_u64, vclzq_u32, vdupq_n_u32, vdupq_n_u64, vextq_u32,
-    vextq_u64, vget_low_u32, vgetq_lane_u64, vld1q_s32, vld1q_u64, vld1q_u8, vmovn_high_u64,
-    vmovn_u64, vqmovn_high_u64, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8, vreinterpretq_s32_u8,
-    vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u32,
-    vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32, vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
+    vaddq_u32, vaddq_u64, vaddvq_u32, vaddvq_u64, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32,
+    vdupq_n_u64, vextq_u32, vextq_u64, vget_low_u32, vgetq_lane_u64, vld1q_s32, vld1q_u64,
+    vld1q_u8, vmovn_high_u64, vmovn_u64, vqmovn_high_u64, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8,
+    vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8,
+    vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32, vst1q_u64, vst1q_u8,
+    vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
@@ -157,11 +158,18 @@ impl RawGroup for RawGroupImpl {
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
         let (tag, written) = group.compute_tag();
-        let shuf = load_shuffle(&ENCODE_TABLE, tag);
         let tbl_bytes = uint8x16x2_t(vreinterpretq_u8_u64(group.0), vreinterpretq_u8_u64(group.1));
-        let out = (vqtbl2q_u8(tbl_bytes, shuf.0), vqtbl2q_u8(tbl_bytes, shuf.1));
-        vst1q_u8(output, out.0);
-        vst1q_u8(output.add(16), out.1);
+        if written <= 16 {
+            // The 4 input values will only produce 16 bytes of output or less so we only need a
+            // single shuffle and store.
+            let shuf = vld1q_u8(ENCODE_TABLE[tag as usize].as_ptr());
+            vst1q_u8(output, vqtbl2q_u8(tbl_bytes, shuf));
+        } else {
+            let shuf = load_shuffle(&ENCODE_TABLE, tag);
+            let out = (vqtbl2q_u8(tbl_bytes, shuf.0), vqtbl2q_u8(tbl_bytes, shuf.1));
+            vst1q_u8(output, out.0);
+            vst1q_u8(output.add(16), out.1);
+        }
         (tag, written)
     }
 
@@ -192,7 +200,7 @@ impl RawGroup for RawGroupImpl {
     #[inline]
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
         let (len, group) = Self::decode(input, tag);
-        (len, group.sum_deltas(base.1))
+        (len, group.sum_deltas(vdupq_laneq_u64(base.1, 1)))
     }
 
     #[inline]
