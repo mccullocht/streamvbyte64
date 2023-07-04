@@ -2,10 +2,10 @@
 This crate is a Rust port of [Daniel Lemire's `streamvbyte` library](https://github.com/lemire/streamvbyte).
 It contains multiple implementations of this format aimed at different integer sizes and value distributions.
 
-Each `Coder` implementation produces different formats that are incompatible with one another.
-Implementations will be SIMD accelerate if:
-* an implementation has been written for your architecture target
-* the CPU being used supports the necessary instructions.
+Each `Coder` implementation produces different formats that are incompatible with one another. Names
+provide the length of each of the 4 possible tags for each value so `Coder1234` encodes each entry
+as 1, 2, 3, or 4 bytes. A scalar implementation is always available at a large speed penalty but
+the implementation will automatically use an accelerated implementation for the target if available.
 
 At the moment group implementations only have acceleration on little-endian `aarch64` targets with
 `NEON` instruction support.
