@@ -1,5 +1,7 @@
 #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
 mod neon;
+#[cfg(target_arch = "x86_64")]
+mod ssse3;
 
 use crate::coder_impl;
 use crate::coding_descriptor::CodingDescriptor;
