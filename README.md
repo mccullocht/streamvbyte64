@@ -31,63 +31,63 @@ for delta coded streams and includes the sum of all values skipped.
 
 ## `Coder1234`
 
-| Benchmark       | Throughput  |
-| --------------- | ----------: |
-| encode/1        |  4.8Gelem/s |
-| encode_deltas/1 |  4.1Gelem/s |
-| decode/1        | 12.7Gelem/s |
-| decode_deltas/1 |  5.6Gelem/s |
-| skip_deltas/1   | 19.9Gelem/s |
-| data_len/1      | 54.2Gelem/s |
-| encode/2        |  4.8Gelem/s |
-| encode_deltas/2 |  3.8Gelem/s |
-| decode/2        |  8.2Gelem/s |
-| decode_deltas/2 |  4.2Gelem/s |
-| skip_deltas/2   |  8.5Gelem/s |
-| encode/4        |  4.8Gelem/s |
-| encode_deltas/4 |  4.1Gelem/s |
-| decode/4        |  8.2Gelem/s |
-| decode_deltas/4 |  4.2Gelem/s |
-| skip_deltas/4   |  8.4Gelem/s |
+| Benchmark         | Throughput    |
+| ----------------- | ------------: |
+| `encode/1       ` | ` 4.8Gelem/s` |
+| `encode_deltas/1` | ` 4.1Gelem/s` |
+| `decode/1       ` | `12.7Gelem/s` |
+| `decode_deltas/1` | ` 5.6Gelem/s` |
+| `skip_deltas/1  ` | `19.9Gelem/s` |
+| `data_len/1     ` | `54.2Gelem/s` |
+| `encode/2       ` | ` 4.8Gelem/s` |
+| `encode_deltas/2` | ` 3.8Gelem/s` |
+| `decode/2       ` | ` 8.2Gelem/s` |
+| `decode_deltas/2` | ` 4.2Gelem/s` |
+| `skip_deltas/2  ` | ` 8.5Gelem/s` |
+| `encode/4       ` | ` 4.8Gelem/s` |
+| `encode_deltas/4` | ` 4.1Gelem/s` |
+| `decode/4       ` | ` 8.2Gelem/s` |
+| `decode_deltas/4` | ` 4.2Gelem/s` |
+| `skip_deltas/4  ` | ` 8.4Gelem/s` |
 
 ## `Coder0124`
 
-| Benchmark       | Throughput  |
-| --------------- | ----------: |
-| encode/1        |  4.2Gelem/s |
-| encode_deltas/1 |  3.6Gelem/s |
-| decode/1        |  7.2Gelem/s |
-| decode_deltas/1 |  4.2Gelem/s |
-| skip_deltas/1   |  7.1Gelem/s |
-| data_len/1      | 53.8Gelem/s |
-| encode/2        |  4.2Gelem/s |
-| encode_deltas/2 |  3.6Gelem/s |
-| decode/2        |  7.2Gelem/s |
-| decode_deltas/2 |  4.2Gelem/s |
-| skip_deltas/2   |  7.3Gelem/s |
-| encode/4        |  4.2Gelem/s |
-| encode_deltas/4 |  3.6Gelem/s |
-| decode/4        |  7.2Gelem/s |
-| decode_deltas/4 |  4.2Gelem/s |
-| skip_deltas/4   |  7.5Gelem/s |
+| Benchmark         | Throughput    |
+| ----------------- | ------------: |
+| `encode/1       ` | ` 4.2Gelem/s` |
+| `encode_deltas/1` | ` 3.6Gelem/s` |
+| `decode/1       ` | ` 7.2Gelem/s` |
+| `decode_deltas/1` | ` 4.2Gelem/s` |
+| `skip_deltas/1  ` | ` 7.1Gelem/s` |
+| `data_len/1     ` | `53.8Gelem/s` |
+| `encode/2       ` | ` 4.2Gelem/s` |
+| `encode_deltas/2` | ` 3.6Gelem/s` |
+| `decode/2       ` | ` 7.2Gelem/s` |
+| `decode_deltas/2` | ` 4.2Gelem/s` |
+| `skip_deltas/2  ` | ` 7.3Gelem/s` |
+| `encode/4       ` | ` 4.2Gelem/s` |
+| `encode_deltas/4` | ` 3.6Gelem/s` |
+| `decode/4       ` | ` 7.2Gelem/s` |
+| `decode_deltas/4` | ` 4.2Gelem/s` |
+| `skip_deltas/4  ` | ` 7.5Gelem/s` |
 
 ## `Coder1248`
 
-| Benchmark       | Throughput  |
-| --------------- | ----------: |
-| encode/1        |  2.5Gelem/s |
-| encode_deltas/1 |  2.1Gelem/s |
-| decode/1        |  4.6Gelem/s |
-| decode_deltas/1 |  2.2Gelem/s |
-| skip_deltas/1   |  6.0Gelem/s |
-| data_len/1      | 53.8Gelem/s |
-| encode/4        |  2.5Gelem/s |
-| encode_deltas/4 |  2.2Gelem/s |
-| decode/4        |  4.8Gelem/s |
-| decode_deltas/4 |  2.1Gelem/s |
-| skip_deltas/4   |  5.7Gelem/s |
-| encode/8        |  2.5Gelem/s |
-| encode_deltas/8 |  2.2Gelem/s |
-| decode/8        |  4.8Gelem/s |
-| decode_deltas/8 |  2.2Gelem/s |
-| skip_deltas/8   |  5.4Gelem/s |
+| Benchmark         | Throughput    |
+| ----------------- | ------------: |
+| `encode/1       ` | ` 2.5Gelem/s` |
+| `encode_deltas/1` | ` 2.1Gelem/s` |
+| `decode/1       ` | ` 4.6Gelem/s` |
+| `decode_deltas/1` | ` 3.6Gelem/s` |
+| `skip_deltas/1  ` | ` 6.0Gelem/s` |
+| `data_len/1     ` | `53.8Gelem/s` |
+| `encode/4       ` | ` 2.5Gelem/s` |
+| `encode_deltas/4` | ` 2.2Gelem/s` |
+| `decode/4       ` | ` 4.8Gelem/s` |
+| `decode_deltas/4` | ` 3.6Gelem/s` |
+| `skip_deltas/4  ` | ` 5.7Gelem/s` |
+| `encode/8       ` | ` 2.5Gelem/s` |
+| `encode_deltas/8` | ` 2.2Gelem/s` |
+| `decode/8       ` | ` 4.8Gelem/s` |
+| `decode_deltas/8` | ` 3.0Gelem/s` |
+| `skip_deltas/8  ` | ` 5.4Gelem/s` |
