@@ -108,8 +108,15 @@ impl Coder for Coder1248 {
         encoded: &[u8],
         values: &mut [u64],
     ) -> usize {
-        // TODO: reenable the neon implementation when performance matches scalar.
-        coder_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
+        match self.0 {
+            Impl::Scalar => {
+                coder_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
+            }
+            #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
+            Impl::Neon => {
+                coder_impl::decode_deltas::<neon::RawGroupImpl>(initial, tags, encoded, values)
+            }
+        }
     }
 
     fn data_len(&self, tags: &[u8]) -> usize {

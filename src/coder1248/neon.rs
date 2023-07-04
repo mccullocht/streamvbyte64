@@ -5,12 +5,12 @@ use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffl
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
-    uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddlvq_u32, vaddq_u32, vaddq_u64,
-    vaddvq_u32, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u64, vld1q_s32,
-    vld1q_u64, vld1q_u8, vmovn_high_u64, vmovn_u64, vpaddd_u64, vqmovn_high_u64, vqmovn_u64,
-    vqtbl1q_u8, vqtbl2q_u8, vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8,
-    vreinterpretq_u64_u8, vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32,
-    vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
+    uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddl_high_u32, vaddl_u32, vaddlvq_u32,
+    vaddq_u32, vaddq_u64, vaddvq_u32, vaddvq_u64, vclzq_u32, vdupq_n_u32, vdupq_n_u64, vextq_u32,
+    vextq_u64, vget_low_u32, vgetq_lane_u64, vld1q_s32, vld1q_u64, vld1q_u8, vmovn_high_u64,
+    vmovn_u64, vqmovn_high_u64, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8, vreinterpretq_s32_u8,
+    vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u32,
+    vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32, vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
@@ -60,8 +60,26 @@ impl RawGroupImpl {
     }
 
     #[inline(always)]
+    unsafe fn sum_deltas(&self, base: uint64x2_t) -> Self {
+        let Self(a_b, c_d) = *self;
+        let z = vdupq_n_u64(0);
+        let z_a = vextq_u64(z, a_b, 1);
+        let a_ab = vaddq_u64(z_a, a_b);
+        let p = base;
+        let pa_pab = vaddq_u64(p, a_ab);
+        let b_c = vextq_u64(a_b, c_d, 1);
+        let bc_cd = vaddq_u64(b_c, c_d);
+        Self(pa_pab, vaddq_u64(pa_pab, bc_cd))
+    }
+
+    #[inline(always)]
+    unsafe fn sum(&self) -> u64 {
+        vaddvq_u64(vaddq_u64(self.0, self.1))
+    }
+
+    #[inline(always)]
     fn has_any_tag3(tag8: u64) -> bool {
-        (tag8 & 0x5555555555555555 & (tag8 >> 1)) > 0
+        (tag8 & 0x5555555555555555 & (tag8 >> 1)) != 0
     }
 
     #[inline(always)]
@@ -70,6 +88,46 @@ impl RawGroupImpl {
             Self::data_len(tag),
             vreinterpretq_u32_u8(vqtbl1q_u8(vld1q_u8(input), load_decode_shuffle_narrow(tag))),
         )
+    }
+
+    #[inline(always)]
+    unsafe fn decode_deltas8_without_tag3(
+        input: *const u8,
+        tag8: u64,
+        base: Self,
+        output: *mut u64,
+    ) -> (usize, Self) {
+        let tags = tag8.to_le_bytes();
+        let mut deltas = [vdupq_n_u32(0); 8];
+        let mut bases = [0u64; 9];
+        bases[0] = vgetq_lane_u64::<1>(base.1);
+        let mut offset = 0usize;
+        unroll! {
+            for i in 0..8 {
+                let (len, delta) = Self::decode32(input.add(offset), tags[i]);
+                deltas[i] = delta;
+                bases[i + 1] = bases[i].wrapping_add(vaddlvq_u32(delta));
+                offset += len;
+            }
+        }
+        let z = vdupq_n_u32(0);
+        unroll! {
+            for i in 0..8 {
+                let p = vdupq_n_u64(bases[i]);
+                let a_b_c_d = deltas[i];
+                let z_a_b_c = vextq_u32(z, a_b_c_d, 3);
+                let a_ab = vaddl_u32(vget_low_u32(z_a_b_c), vget_low_u32(a_b_c_d));
+                let bc_cd = vaddl_high_u32(z_a_b_c, a_b_c_d);
+                let pa_pab = vaddq_u64(p, a_ab);
+                let group = Self(pa_pab, vaddq_u64(pa_pab, bc_cd));
+                Self::store_unaligned(output.add(i * 4), group);
+                if i == 7 {
+                    return (offset, group);
+                }
+            }
+        }
+
+        unreachable!()
     }
 }
 
@@ -133,16 +191,8 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
-        let (len, Self(a_b, c_d)) = Self::decode(input, tag);
-        let z = vdupq_n_u64(0);
-        let z_a = vextq_u64(z, a_b, 1);
-        let a_ab = vaddq_u64(z_a, a_b);
-        let p = vdupq_laneq_u64(base.1, 1);
-        let pa_pab = vaddq_u64(p, a_ab);
-        let b_c = vextq_u64(a_b, c_d, 1);
-        let bc_cd = vaddq_u64(b_c, c_d);
-        let pabc_pabcd = vaddq_u64(pa_pab, bc_cd);
-        (len, RawGroupImpl(pa_pab, pabc_pabcd))
+        let (len, group) = Self::decode(input, tag);
+        (len, group.sum_deltas(base.1))
     }
 
     #[inline]
@@ -153,13 +203,49 @@ impl RawGroup for RawGroupImpl {
     #[inline]
     unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem) {
         let (len, group) = Self::decode(input, tag);
-        let half = vaddq_u64(group.0, group.1);
-        (len, vpaddd_u64(half))
+        (len, group.sum())
     }
 
     #[inline]
     fn data_len8(tag8: u64) -> usize {
         data_len8(Self::TAG_LEN, tag8)
+    }
+
+    #[inline]
+    unsafe fn decode_deltas8(
+        input: *const u8,
+        tag8: u64,
+        base: Self,
+        output: *mut Self::Elem,
+    ) -> (usize, Self) {
+        if !Self::has_any_tag3(tag8) {
+            return Self::decode_deltas8_without_tag3(input, tag8, base, output);
+        }
+
+        let tags = tag8.to_le_bytes();
+        let mut group_deltas = [Self(vdupq_n_u64(0), vdupq_n_u64(0)); 8];
+        let mut bases = [0u64; 9];
+        bases[0] = vgetq_lane_u64::<1>(base.1);
+        let mut offset = 0usize;
+        unroll! {
+            for i in 0..8 {
+                let (len, group) = Self::decode(input.add(offset), tags[i]);
+                group_deltas[i] = group;
+                bases[i + 1] = bases[i].wrapping_add(group.sum());
+                offset += len;
+            }
+        }
+        unroll! {
+            for i in 0..8 {
+                let group = group_deltas[i].sum_deltas(vdupq_n_u64(bases[i]));
+                Self::store_unaligned(output.add(i * 4), group);
+                if i == 7 {
+                    return (offset, group);
+                }
+            }
+        }
+
+        unreachable!()
     }
 
     #[inline]
