@@ -106,7 +106,7 @@ impl Coder for Coder1234 {
             Impl::Scalar => coder_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
-            Impl::SSSE3 => coder_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
+            Impl::SSSE3 => coder_impl::decode::<ssse3::RawGroupImpl>(tags, encoded, values),
         }
     }
 
@@ -126,7 +126,7 @@ impl Coder for Coder1234 {
                 coder_impl::decode_deltas::<neon::RawGroupImpl>(initial, tags, encoded, values)
             }
             Impl::SSSE3 => {
-                coder_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
+                coder_impl::decode_deltas::<ssse3::RawGroupImpl>(initial, tags, encoded, values)
             }
         }
     }
@@ -136,7 +136,7 @@ impl Coder for Coder1234 {
             Impl::Scalar => coder_impl::data_len::<scalar::RawGroupImpl>(tags),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::data_len::<neon::RawGroupImpl>(tags),
-            Impl::SSSE3 => coder_impl::data_len::<scalar::RawGroupImpl>(tags),
+            Impl::SSSE3 => coder_impl::data_len::<ssse3::RawGroupImpl>(tags),
         }
     }
 
@@ -145,7 +145,7 @@ impl Coder for Coder1234 {
             Impl::Scalar => coder_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
-            Impl::SSSE3 => coder_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
+            Impl::SSSE3 => coder_impl::skip_deltas::<ssse3::RawGroupImpl>(tags, encoded),
         }
     }
 }
