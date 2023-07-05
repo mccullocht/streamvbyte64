@@ -1,3 +1,5 @@
+use crunchy::unroll;
+
 use super::{scalar, CodingDescriptor1234};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
@@ -149,27 +151,21 @@ impl RawGroup for RawGroupImpl {
         (len, d.into_iter().fold(0, |s, d| s.wrapping_add(d)))
     }
 
-    /*
-    #[inline]
-    unsafe fn decode8(input: *const u8, tag8: u64, output: *mut Self::Elem) -> usize {
-        todo!()
-    }
-
-    #[inline]
-    unsafe fn decode_deltas8(
-        input: *const u8,
-        tag8: u64,
-        base: Self,
-        output: *mut Self::Elem,
-    ) -> (usize, Self) {
-        todo!()
-    }
-
     #[inline]
     unsafe fn skip_deltas8(input: *const u8, tag8: u64) -> (usize, Self::Elem) {
-        todo!()
+        let tags = tag8.to_le_bytes();
+        let (mut offset, mut delta_sum) = Self::decode(input, tags[0]);
+        unroll! {
+            for i in 1..8 {
+                let (len, deltas) = Self::decode(input.add(offset), tags[i]);
+                offset += len;
+                delta_sum.0 = _mm_add_epi32(delta_sum.0, deltas.0);
+            }
+        }
+        let mut d = [0u32; 4];
+        _mm_storeu_si128(d.as_mut_ptr() as *mut __m128i, delta_sum.0);
+        (offset, d.into_iter().fold(0, |s, d| s.wrapping_add(d)))
     }
-    */
 }
 
 #[cfg(test)]
