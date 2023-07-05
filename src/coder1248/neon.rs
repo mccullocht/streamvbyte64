@@ -1,7 +1,7 @@
 use crunchy::unroll;
 
 use super::{scalar, CodingDescriptor1248};
-use crate::arch::neon::{data_len8, tag_decode_shuffle_table64, tag_encode_shuffle_table64};
+use crate::arch::neon::data_len8;
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
@@ -14,8 +14,10 @@ use std::arch::aarch64::{
     vsubq_u64, vuzp2q_u32,
 };
 
-const ENCODE_TABLE: [[u8; 32]; 256] = tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
-const DECODE_TABLE: [[u8; 32]; 256] = tag_decode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
+const ENCODE_TABLE: [[u8; 32]; 256] =
+    crate::arch::tag_encode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
+const DECODE_TABLE: [[u8; 32]; 256] =
+    crate::arch::tag_decode_shuffle_table64(CodingDescriptor1248::TAG_LEN);
 
 /// Load a single 32-byte entry from table based on tag.
 #[inline(always)]
