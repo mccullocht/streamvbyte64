@@ -10,56 +10,10 @@ use std::arch::x86_64::{
     _mm_sub_epi32,
 };
 
-// XXX share this with the neon iplementation.
-const fn generate_encode_table() -> [[u8; 16]; 256] {
-    let tag_len = [1usize, 2, 3, 4];
-    // Default fill with 128 because pshufb will zero fill anything with the hi bit set.
-    let mut table = [[128u8; 16]; 256];
-    let mut tag = 0usize;
-    while tag < 256 {
-        let mut shuf_idx = 0;
-        let mut i = 0;
-        while i < 4 {
-            let vtag = (tag >> (i * 2)) & 0x3;
-            let mut j = 0;
-            while j < tag_len[vtag as usize] {
-                table[tag][shuf_idx] = (i * 4 + j) as u8;
-                shuf_idx += 1;
-                j += 1;
-            }
-            i += 1;
-        }
-        tag += 1;
-    }
-    table
-}
-
-// XXX share this with the neon iplementation.
-const fn generate_decode_table() -> [[u8; 16]; 256] {
-    let tag_len = [1usize, 2, 3, 4];
-    // Default fill with 128 because pshufb will zero fill anything with the hi bit set.
-    let mut table = [[128u8; 16]; 256];
-    let mut tag = 0usize;
-    while tag < 256 {
-        let mut shuf_idx = 0;
-        let mut i = 0;
-        while i < 4 {
-            let vtag = (tag >> (i * 2)) & 0x3;
-            let mut j = 0;
-            while j < tag_len[vtag as usize] {
-                table[tag][i * 4 + j] = shuf_idx;
-                shuf_idx += 1;
-                j += 1;
-            }
-            i += 1;
-        }
-        tag += 1;
-    }
-    table
-}
-
-const ENCODE_TABLE: [[u8; 16]; 256] = generate_encode_table();
-const DECODE_TABLE: [[u8; 16]; 256] = generate_decode_table();
+const ENCODE_TABLE: [[u8; 16]; 256] =
+    crate::arch::tag_encode_shuffle_table32(RawGroupImpl::TAG_LEN);
+const DECODE_TABLE: [[u8; 16]; 256] =
+    crate::arch::tag_decode_shuffle_table32(RawGroupImpl::TAG_LEN);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(__m128i);
