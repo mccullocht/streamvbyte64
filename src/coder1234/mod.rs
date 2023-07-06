@@ -42,7 +42,8 @@ enum Impl {
     Scalar,
     #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
     Neon,
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64"))]
+    #[allow(dead_code)]
     SSSE3,
 }
 
@@ -62,7 +63,7 @@ impl Coder for Coder1234 {
                 return Coder1234(Impl::Neon);
             }
         }
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse3"))]
         {
             if std::arch::is_x86_feature_detected!("ssse3") {
                 return Coder1234(Impl::SSSE3);
