@@ -119,6 +119,16 @@ impl RawGroup for RawGroupImpl {
         _mm_storeu_si128(d.as_mut_ptr() as *mut __m128i, delta_sum.0);
         (offset, d.into_iter().fold(0, |s, d| s.wrapping_add(d)))
     }
+
+    #[inline]
+    fn data_len8(tag8: u64) -> usize {
+        let sum4 = ((tag8 >> 2) & 0x3333333333333333) + (tag8 & 0x3333333333333333);
+        let sum8 = ((sum4 >> 4) & 0x0f0f0f0f0f0f0f0f) + (sum4 & 0x0f0f0f0f0f0f0f0f);
+        let sum16 = ((sum8 >> 8) & 0x00ff00ff00ff00ff) + (sum8 & 0x00ff00ff00ff00ff);
+        let sum32 = ((sum16 >> 16) & 0x0000ffff0000ffff) + (sum16 & 0x0000ffff0000ffff);
+        let sum64 = ((sum32 >> 32) & 0xffffffff) + (sum32 & 0xffffffff);
+        sum64 as usize + 32
+    }
 }
 
 #[cfg(test)]
