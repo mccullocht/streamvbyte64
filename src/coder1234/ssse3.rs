@@ -39,8 +39,7 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        // XXX This came from the implementation in lemire's repository.
-        // TODO: add encode2() to interface as we could easily compute two tags at once.
+        // This implementation for generating the tag byte came from https://github.com/lemire/streamvbyte/blob/08c60644dc6956182c68c1b453ba5f2d42367823/src/streamvbytedelta_x64_encode.c
         let mask_01 = _mm_set1_epi8(0x1);
         let mask_7f00 = _mm_set1_epi16(0x7f00);
 
