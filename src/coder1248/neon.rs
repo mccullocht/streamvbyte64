@@ -6,15 +6,16 @@ use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddl_high_u32, vaddl_u32, vaddlvq_u32,
-    vaddq_u32, vaddq_u64, vaddv_u16, vaddvq_u32, vaddvq_u64, vand_u16, vclzq_u32, vdup_n_u16,
-    vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u32, vextq_u64, vget_lane_u64, vget_low_u32,
-    vgetq_lane_u64, vld1q_s32, vld1q_u64, vld1q_u8, vminq_u16, vminq_u8, vmovn_high_u64, vmovn_u64,
-    vqmovn_high_u16, vqmovn_high_u64, vqmovn_u16, vqmovn_u32, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8,
-    vreinterpret_s16_u16, vreinterpret_u16_u8, vreinterpret_u32_u16, vreinterpret_u64_u32,
-    vreinterpret_u8_u16, vreinterpretq_s32_u8, vreinterpretq_u16_u32, vreinterpretq_u16_u8,
-    vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u16,
-    vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshl_u16, vshlq_u32, vshr_n_u8, vshrq_n_u32,
-    vsra_n_u16, vsra_n_u32, vsra_n_u64, vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
+    vaddq_u32, vaddq_u64, vaddv_u16, vaddv_u8, vaddvq_u32, vaddvq_u64, vand_u16, vand_u8, vcgtq_u8,
+    vclzq_u32, vdup_n_u16, vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u32, vextq_u64,
+    vget_lane_u64, vget_low_u32, vgetq_lane_u64, vld1_u8, vld1q_s32, vld1q_u64, vld1q_u8,
+    vminq_u16, vminq_u8, vmovn_high_u64, vmovn_u64, vqmovn_high_u16, vqmovn_high_u64, vqmovn_u16,
+    vqmovn_u32, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8, vreinterpret_s16_u16, vreinterpret_u16_u8,
+    vreinterpret_u32_u16, vreinterpret_u64_u32, vreinterpret_u8_u16, vreinterpretq_s32_u8,
+    vreinterpretq_u16_u32, vreinterpretq_u16_u8, vreinterpretq_u32_u16, vreinterpretq_u32_u64,
+    vreinterpretq_u32_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u16, vreinterpretq_u8_u32,
+    vreinterpretq_u8_u64, vshl_u16, vshlq_u32, vshr_n_u8, vshrq_n_u32, vsra_n_u16, vsra_n_u32,
+    vsra_n_u64, vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] =
@@ -115,6 +116,33 @@ impl RawGroupImpl {
     }
 
     #[inline(always)]
+    unsafe fn compute_tagnc(&self) -> (u8, usize) {
+        let cmask = vreinterpretq_u8_u64(vdupq_n_u64(0xff));
+        let c = (
+            vcgtq_u8(vreinterpretq_u8_u64(self.0), cmask),
+            vcgtq_u8(vreinterpretq_u8_u64(self.1), cmask),
+        );
+        let n1 = vqmovn_high_u16(
+            vqmovn_u16(vreinterpretq_u16_u8(c.0)),
+            vreinterpretq_u16_u8(c.1),
+        );
+        // if hi 8 of lo 16 are set we want the output to be 0xff00 so min by that.
+        // min of hi 16 doesn't matter as long as it is > 0.
+        let m1 = vreinterpretq_u32_u16(vminq_u16(
+            vreinterpretq_u16_u8(n1),
+            vreinterpretq_u16_u32(vdupq_n_u32(0x1_ff00)),
+        ));
+        // the hi bit in each byte should be set to 1 if it should appear in the output tag.
+        let n2 = vreinterpret_u8_u16(vqmovn_u32(m1));
+
+        let tag = vaddv_u8(vand_u8(
+            n2,
+            vld1_u8([0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80].as_ptr()),
+        ));
+        (tag, Self::data_len(tag))
+    }
+
+    #[inline(always)]
     unsafe fn sum_deltas(&self, base: uint64x2_t) -> Self {
         let Self(a_b, c_d) = *self;
         let z = vdupq_n_u64(0);
@@ -211,7 +239,7 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        let (tag, written) = group.compute_tagn();
+        let (tag, written) = group.compute_tagnc();
         let tbl_bytes = uint8x16x2_t(vreinterpretq_u8_u64(group.0), vreinterpretq_u8_u64(group.1));
         if written <= 16 {
             // The 4 input values will only produce 16 bytes of output or less so we only need a
@@ -345,7 +373,7 @@ mod test {
             #[test]
             fn $name() {
                 let group = RawGroupImpl::set1($value);
-                let actual_tag = unsafe { group.compute_tagn().0 };
+                let actual_tag = unsafe { group.compute_tagnc().0 };
                 let expected_tag = $vtag | ($vtag << 2) | ($vtag << 4) | ($vtag << 6);
                 assert_eq!(actual_tag & 0x3, $vtag);
                 assert_eq!(actual_tag, expected_tag);
