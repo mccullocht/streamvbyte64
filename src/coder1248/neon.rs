@@ -6,12 +6,15 @@ use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
     uint32x4_t, uint64x2_t, uint8x16_t, uint8x16x2_t, vaddl_high_u32, vaddl_u32, vaddlvq_u32,
-    vaddq_u32, vaddq_u64, vaddvq_u32, vaddvq_u64, vclzq_u32, vdupq_laneq_u64, vdupq_n_u32,
-    vdupq_n_u64, vextq_u32, vextq_u64, vget_low_u32, vgetq_lane_u64, vld1q_s32, vld1q_u64,
-    vld1q_u8, vmovn_high_u64, vmovn_u64, vqmovn_high_u64, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8,
-    vreinterpretq_s32_u8, vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8,
-    vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshlq_u32, vshrq_n_u32, vst1q_u64, vst1q_u8,
-    vsubq_u64, vuzp2q_u32,
+    vaddq_u32, vaddq_u64, vaddv_u16, vaddvq_u32, vaddvq_u64, vand_u16, vclzq_u32, vdup_n_u16,
+    vdupq_laneq_u64, vdupq_n_u32, vdupq_n_u64, vextq_u32, vextq_u64, vget_lane_u64, vget_low_u32,
+    vgetq_lane_u64, vld1q_s32, vld1q_u64, vld1q_u8, vminq_u16, vminq_u8, vmovn_high_u64, vmovn_u64,
+    vqmovn_high_u16, vqmovn_high_u64, vqmovn_u16, vqmovn_u32, vqmovn_u64, vqtbl1q_u8, vqtbl2q_u8,
+    vreinterpret_s16_u16, vreinterpret_u16_u8, vreinterpret_u32_u16, vreinterpret_u64_u32,
+    vreinterpret_u8_u16, vreinterpretq_s32_u8, vreinterpretq_u16_u32, vreinterpretq_u16_u8,
+    vreinterpretq_u32_u64, vreinterpretq_u32_u8, vreinterpretq_u64_u8, vreinterpretq_u8_u16,
+    vreinterpretq_u8_u32, vreinterpretq_u8_u64, vshl_u16, vshlq_u32, vshr_n_u8, vshrq_n_u32,
+    vsra_n_u16, vsra_n_u32, vsra_n_u64, vst1q_u64, vst1q_u8, vsubq_u64, vuzp2q_u32,
 };
 
 const ENCODE_TABLE: [[u8; 32]; 256] =
@@ -59,6 +62,55 @@ impl RawGroupImpl {
         )) as u8;
         let written =
             vaddvq_u32(vshlq_u32(vdupq_n_u32(1), vreinterpretq_s32_u8(value_tags))) as usize;
+        (tag, written)
+    }
+
+    // This is 14% slower than the existing approach which is not that surprising _but_ this
+    // approach would almost certainly work in ssse3.
+    #[inline(always)]
+    unsafe fn compute_tagn(&self) -> (u8, usize) {
+        let mmask = vreinterpretq_u8_u64(vdupq_n_u64(0x0101010101010100));
+        let m = (
+            vminq_u8(vreinterpretq_u8_u64(self.0), mmask),
+            vminq_u8(vreinterpretq_u8_u64(self.1), mmask),
+        );
+        let n1 = vqmovn_high_u16(
+            vqmovn_u16(vreinterpretq_u16_u8(m.0)),
+            vreinterpretq_u16_u8(m.1),
+        );
+        let n2 = vreinterpretq_u8_u16(vminq_u16(
+            vreinterpretq_u16_u8(n1),
+            vreinterpretq_u16_u32(vdupq_n_u32(0x1_0100)),
+        ));
+        let n3 = vaddq_u32(vreinterpretq_u32_u8(n2), vdupq_n_u32(0x7f00));
+        // the hi bit in each byte should be set to 1 if it should appear in the output tag.
+        let n4 = vreinterpret_u8_u16(vqmovn_u32(n3));
+        // *** 7 inst to this point
+        let tag_bits = vshr_n_u8(n4, 7);
+        // bottom 2 bits of each lane contain tag.
+        let tag_lanes = vsra_n_u16(
+            vreinterpret_u16_u8(tag_bits),
+            vreinterpret_u16_u8(tag_bits),
+            7,
+        );
+
+        // bottom 4 bits of each lane contain tag.
+        let tag_nibbles = vsra_n_u32(
+            vreinterpret_u32_u16(tag_lanes),
+            vreinterpret_u32_u16(tag_lanes),
+            14,
+        );
+        let tag = vget_lane_u64::<0>(vsra_n_u64(
+            vreinterpret_u64_u32(tag_nibbles),
+            vreinterpret_u64_u32(tag_nibbles),
+            28,
+        )) as u8;
+
+        let written = vaddv_u16(vshl_u16(
+            vdup_n_u16(1),
+            vreinterpret_s16_u16(vand_u16(tag_lanes, vdup_n_u16(3))),
+        )) as usize;
+
         (tag, written)
     }
 
@@ -159,7 +211,7 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        let (tag, written) = group.compute_tag();
+        let (tag, written) = group.compute_tagn();
         let tbl_bytes = uint8x16x2_t(vreinterpretq_u8_u64(group.0), vreinterpretq_u8_u64(group.1));
         if written <= 16 {
             // The 4 input values will only produce 16 bytes of output or less so we only need a
@@ -283,3 +335,39 @@ crate::tests::raw_group_test_suite!();
 
 #[cfg(test)]
 crate::tests::compat_test_suite!();
+
+#[cfg(test)]
+mod test {
+    use super::{RawGroup, RawGroupImpl};
+
+    macro_rules! compute_tagn_test {
+        ($name:ident, $value:literal, $vtag:literal) => {
+            #[test]
+            fn $name() {
+                let group = RawGroupImpl::set1($value);
+                let actual_tag = unsafe { group.compute_tagn().0 };
+                let expected_tag = $vtag | ($vtag << 2) | ($vtag << 4) | ($vtag << 6);
+                assert_eq!(actual_tag & 0x3, $vtag);
+                assert_eq!(actual_tag, expected_tag);
+            }
+        };
+    }
+
+    compute_tagn_test!(compute_tagn_0000, 0x00_00_00_00, 0);
+    compute_tagn_test!(compute_tagn_0001, 0x00_00_00_01, 0);
+    compute_tagn_test!(compute_tagn_0010, 0x00_00_01_00, 1);
+    compute_tagn_test!(compute_tagn_0011, 0x00_00_01_01, 1);
+    compute_tagn_test!(compute_tagn_0100, 0x00_01_00_00, 2);
+    compute_tagn_test!(compute_tagn_0101, 0x00_01_00_01, 2);
+    compute_tagn_test!(compute_tagn_0110, 0x00_01_01_00, 2);
+    compute_tagn_test!(compute_tagn_0111, 0x00_01_01_01, 2);
+    compute_tagn_test!(compute_tagn_1000, 0x01_00_00_00, 2);
+    compute_tagn_test!(compute_tagn_1001, 0x01_00_00_01, 2);
+    compute_tagn_test!(compute_tagn_1010, 0x01_00_01_00, 2);
+    compute_tagn_test!(compute_tagn_1011, 0x01_00_01_01, 2);
+    compute_tagn_test!(compute_tagn_1100, 0x01_01_00_00, 2);
+    compute_tagn_test!(compute_tagn_1101, 0x01_01_00_01, 2);
+    compute_tagn_test!(compute_tagn_1110, 0x01_01_01_00, 2);
+    compute_tagn_test!(compute_tagn_1111, 0x01_01_01_01, 2);
+    compute_tagn_test!(compute_tagn_10000, 0x01_00_00_00_00, 3);
+}
