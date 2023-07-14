@@ -72,7 +72,7 @@ impl Coder for Coder1248 {
         #[cfg(all(target_arch = "x86_64", target_feature = "sse3"))]
         {
             if std::arch::is_x86_feature_detected!("ssse3") {
-                return Coder1234(Impl::SSSE3);
+                return Coder1248(Impl::SSSE3);
             }
         }
         Coder1248(Impl::Scalar)
