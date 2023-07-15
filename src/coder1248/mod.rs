@@ -69,7 +69,7 @@ impl Coder for Coder1248 {
                 return Coder1248(Impl::Neon);
             }
         }
-        #[cfg(all(target_arch = "x86_64", target_feature = "sse3"))]
+        #[cfg(all(target_arch = "x86_64", target_feature = "ssse3"))]
         {
             if std::arch::is_x86_feature_detected!("ssse3") {
                 return Coder1248(Impl::SSSE3);
@@ -84,7 +84,7 @@ impl Coder for Coder1248 {
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::encode::<neon::RawGroupImpl>(values, tags, encoded),
             #[cfg(target_arch = "x86_64")]
-            Impl::SSSE3 => coder_impl::encode::<scalar::RawGroupImpl>(values, tags, encoded),
+            Impl::SSSE3 => coder_impl::encode::<ssse3::RawGroupImpl>(values, tags, encoded),
         }
     }
 
@@ -105,7 +105,7 @@ impl Coder for Coder1248 {
             }
             #[cfg(target_arch = "x86_64")]
             Impl::SSSE3 => {
-                coder_impl::encode_deltas::<scalar::RawGroupImpl>(initial, values, tags, encoded)
+                coder_impl::encode_deltas::<ssse3::RawGroupImpl>(initial, values, tags, encoded)
             }
         }
     }
@@ -116,7 +116,7 @@ impl Coder for Coder1248 {
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
             #[cfg(target_arch = "x86_64")]
-            Impl::SSSE3 => coder_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
+            Impl::SSSE3 => coder_impl::decode::<ssse3::RawGroupImpl>(tags, encoded, values),
         }
     }
 
@@ -137,7 +137,7 @@ impl Coder for Coder1248 {
             }
             #[cfg(target_arch = "x86_64")]
             Impl::SSSE3 => {
-                coder_impl::decode_deltas::<scalar::RawGroupImpl>(initial, tags, encoded, values)
+                coder_impl::decode_deltas::<ssse3::RawGroupImpl>(initial, tags, encoded, values)
             }
         }
     }
@@ -148,7 +148,7 @@ impl Coder for Coder1248 {
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::data_len::<neon::RawGroupImpl>(tags),
             #[cfg(target_arch = "x86_64")]
-            Impl::SSSE3 => coder_impl::data_len::<scalar::RawGroupImpl>(tags),
+            Impl::SSSE3 => coder_impl::data_len::<ssse3::RawGroupImpl>(tags),
         }
     }
 
@@ -158,7 +158,7 @@ impl Coder for Coder1248 {
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
             #[cfg(target_arch = "x86_64")]
-            Impl::SSSE3 => coder_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
+            Impl::SSSE3 => coder_impl::skip_deltas::<ssse3::RawGroupImpl>(tags, encoded),
         }
     }
 }
