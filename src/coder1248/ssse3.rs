@@ -2,9 +2,10 @@ use super::{scalar, CodingDescriptor1248};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::x86_64::{
-    __m128i, _mm_add_epi32, _mm_loadu_si128, _mm_min_epi16, _mm_min_epi8, _mm_min_epu16,
-    _mm_movemask_epi8, _mm_packus_epi16, _mm_packus_epi32, _mm_set1_epi32, _mm_set1_epi64x,
-    _mm_shuffle_epi8, _mm_storeu_si128,
+    __m128i, _mm_add_epi32, _mm_add_epi64, _mm_alignr_epi8, _mm_bslli_si128, _mm_bsrli_si128,
+    _mm_cvtsi128_si64x, _mm_loadu_si128, _mm_min_epi8, _mm_min_epu16, _mm_movemask_epi8,
+    _mm_packus_epi16, _mm_packus_epi32, _mm_set1_epi32, _mm_set1_epi64x, _mm_shuffle_epi32,
+    _mm_shuffle_epi8, _mm_storeu_si128, _mm_sub_epi64,
 };
 
 const fn generate_encode_shuffle_table() -> [[u8; 16]; 16] {
@@ -70,6 +71,7 @@ impl RawGroupImpl {
     /// narrow will ensure that if bytes 5-8 are set we will set all bits in the output tag.
     #[inline(always)]
     unsafe fn compute_tag(&self) -> u8 {
+        // XXX consider doing bitwise compare instead to avoid having to do an add.
         let mmask = _mm_set1_epi64x(0x0101010101010100);
         let m = (_mm_min_epi8(self.0, mmask), _mm_min_epi8(self.1, mmask));
         let n1 = _mm_packus_epi16(m.0, m.1);
@@ -132,7 +134,15 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-        todo!()
+        let delta_base = (
+            _mm_alignr_epi8::<8>(group.0, base.1),
+            _mm_alignr_epi8::<8>(group.1, group.0),
+        );
+        let delta_group = RawGroupImpl(
+            _mm_sub_epi64(group.0, delta_base.0),
+            _mm_sub_epi64(group.1, delta_base.1),
+        );
+        Self::encode(output, delta_group)
     }
 
     #[inline]
@@ -157,7 +167,14 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
-        todo!()
+        let delta_base = _mm_shuffle_epi32(base.1, 0b11101110);
+        let (len, Self(a_b, c_d)) = Self::decode(input, tag);
+        let z_a = _mm_bslli_si128(a_b, 8);
+        let b_c = _mm_alignr_epi8(c_d, a_b, 8);
+        let a_ab = _mm_add_epi64(z_a, a_b);
+        let pa_pab = _mm_add_epi64(delta_base, a_ab);
+        let bc_cd = _mm_add_epi64(b_c, c_d);
+        (len, RawGroupImpl(pa_pab, _mm_add_epi64(pa_pab, bc_cd)))
     }
 
     #[inline]
@@ -167,7 +184,10 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn skip_deltas(input: *const u8, tag: u8) -> (usize, Self::Elem) {
-        todo!()
+        let (len, Self(a_b, c_d)) = Self::decode(input, tag);
+        let ac_bd = _mm_add_epi64(a_b, c_d);
+        let abcd_bd = _mm_add_epi64(_mm_bsrli_si128::<8>(ac_bd), ac_bd);
+        (len, std::mem::transmute(_mm_cvtsi128_si64x(abcd_bd)))
     }
 }
 
