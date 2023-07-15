@@ -1,9 +1,10 @@
+// XXX this should be sse41.rs since that's needed for the encoding instructions.
 use super::{scalar, CodingDescriptor1248};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::x86_64::{
     __m128i, _mm_add_epi32, _mm_add_epi64, _mm_alignr_epi8, _mm_bslli_si128, _mm_bsrli_si128,
-    _mm_cvtsi128_si64x, _mm_loadu_si128, _mm_min_epi8, _mm_min_epu16, _mm_movemask_epi8,
+    _mm_cvtsi128_si64x, _mm_loadu_si128, _mm_min_epu16, _mm_min_epu8, _mm_movemask_epi8,
     _mm_packus_epi16, _mm_packus_epi32, _mm_set1_epi32, _mm_set1_epi64x, _mm_shuffle_epi32,
     _mm_shuffle_epi8, _mm_storeu_si128, _mm_sub_epi64,
 };
@@ -71,13 +72,14 @@ impl RawGroupImpl {
     /// narrow will ensure that if bytes 5-8 are set we will set all bits in the output tag.
     #[inline(always)]
     unsafe fn compute_tag(&self) -> u8 {
-        // XXX consider doing bitwise compare instead to avoid having to do an add.
         let mmask = _mm_set1_epi64x(0x0101010101010100);
-        let m = (_mm_min_epi8(self.0, mmask), _mm_min_epi8(self.1, mmask));
+        let m = (_mm_min_epu8(self.0, mmask), _mm_min_epu8(self.1, mmask));
         let n1 = _mm_packus_epi16(m.0, m.1);
+        // XXX sse41
         let m1 = _mm_min_epu16(n1, _mm_set1_epi32(0x1_0100));
         // map 0x0100 => 0x8000 for movemask
         let m2 = _mm_add_epi32(m1, _mm_set1_epi32(0x7f00));
+        // XXX this is an sse41 feature
         let n2 = _mm_packus_epi32(m2, m2);
         _mm_movemask_epi8(n2) as u8
     }
@@ -117,12 +119,14 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
+        // XXX given the approach could try avx for this. use a larger table but a single load for
+        // shuffle table but still need to break up into two stores.
         let tag = group.compute_tag();
         let utag = tag as usize;
         let half_lens = Self::nibble_tag_lens(utag);
         let shuf = (
-            _mm_loadu_si128(ENCODE_TABLE[tag as usize & 0xf].as_ptr() as *const __m128i),
-            _mm_loadu_si128(ENCODE_TABLE[tag as usize >> 4].as_ptr() as *const __m128i),
+            _mm_loadu_si128(ENCODE_TABLE[utag & 0xf].as_ptr() as *const __m128i),
+            _mm_loadu_si128(ENCODE_TABLE[utag >> 4].as_ptr() as *const __m128i),
         );
         _mm_storeu_si128(output as *mut __m128i, _mm_shuffle_epi8(group.0, shuf.0));
         _mm_storeu_si128(
@@ -134,6 +138,7 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
+        // XXX this becomes more difficult in avx but you save on the subtraction.
         let delta_base = (
             _mm_alignr_epi8::<8>(group.0, base.1),
             _mm_alignr_epi8::<8>(group.1, group.0),
