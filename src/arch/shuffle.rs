@@ -19,7 +19,7 @@ pub(crate) const fn encode_shuffle_entry<const ELEM_LEN: usize, const ENTRY_LEN:
     let mut shuf_idx = 0;
     let mut i = 0;
     while i < num_values {
-        let len = tag_len[(tag as usize >> (i * 2) & 0x3) as usize];
+        let len = tag_len[tag as usize >> (i * 2) & 0x3];
         let mut j = 0;
         while j < len {
             entry[shuf_idx] = (i * ELEM_LEN + j) as u8;
@@ -47,7 +47,7 @@ pub(crate) const fn decode_shuffle_entry<const ELEM_LEN: usize, const ENTRY_LEN:
     let mut shuf_idx = 0;
     let mut i = 0;
     while i < num_values {
-        let len = tag_len[(tag as usize >> (i * 2) & 0x3) as usize];
+        let len = tag_len[tag as usize >> (i * 2) & 0x3];
         let mut j = 0;
         while j < len {
             entry[i * ELEM_LEN + j] = shuf_idx;
