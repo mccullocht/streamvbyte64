@@ -1,7 +1,7 @@
 use crunchy::unroll;
 
 use super::{scalar, CodingDescriptor0124};
-use crate::arch::neon::{data_len8, sum_deltas32};
+use crate::arch::neon::{data_len8, decode_shuffle_table, encode_shuffle_table, sum_deltas32};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::aarch64::{
@@ -11,9 +11,9 @@ use std::arch::aarch64::{
 };
 
 const ENCODE_TABLE: [[u8; 16]; 256] =
-    crate::arch::tag_encode_shuffle_table32(CodingDescriptor0124::TAG_LEN);
+    encode_shuffle_table::<{ std::mem::size_of::<u32>() }, 16>(CodingDescriptor0124::TAG_LEN);
 const DECODE_TABLE: [[u8; 16]; 256] =
-    crate::arch::tag_decode_shuffle_table32(CodingDescriptor0124::TAG_LEN);
+    decode_shuffle_table::<{ std::mem::size_of::<u32>() }, 16>(CodingDescriptor0124::TAG_LEN);
 
 /// Takes a `u64` containing 8 tag values and produces a value containing the start offset of each
 /// group (one per byte) and the sum of all group lengths.

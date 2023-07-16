@@ -1,7 +1,38 @@
+use super::shuffle::{decode_shuffle_entry, encode_shuffle_entry};
 use std::arch::aarch64::{
     uint32x4_t, vaddlvq_u8, vaddq_u32, vandq_u8, vdupq_n_u32, vdupq_n_u8, vextq_u32, vld1q_u64,
     vld1q_u8, vqtbl1q_u8, vreinterpretq_u8_u64,
 };
+
+/// Generate a table that encodes `ENTRY_LEN / ELEM_LEN` input values to contiguous bytes based on
+/// `tag and `tag_len`.
+pub(crate) const fn encode_shuffle_table<const ELEM_LEN: usize, const ENTRY_LEN: usize>(
+    tag_len: [usize; 4],
+) -> [[u8; ENTRY_LEN]; 256] {
+    let mut table = [[0u8; ENTRY_LEN]; 256];
+    let mut tag = 0;
+    while tag < 256 {
+        table[tag] =
+            encode_shuffle_entry::<ELEM_LEN, ENTRY_LEN>(tag as u8, tag_len, ENTRY_LEN as u8);
+        tag += 1;
+    }
+    table
+}
+
+/// Generate a table that decodes `ENTRY_LEN / ELEM_LEN` values from contiguous bytes based on
+/// `tag and `tag_len`.
+pub(crate) const fn decode_shuffle_table<const ELEM_LEN: usize, const ENTRY_LEN: usize>(
+    tag_len: [usize; 4],
+) -> [[u8; ENTRY_LEN]; 256] {
+    let mut table = [[0u8; ENTRY_LEN]; 256];
+    let mut tag = 0;
+    while tag < 256 {
+        table[tag] =
+            decode_shuffle_entry::<ELEM_LEN, ENTRY_LEN>(tag as u8, tag_len, ENTRY_LEN as u8);
+        tag += 1;
+    }
+    table
+}
 
 /// Generate a table mapping the lower half (nibble) of a tag to the length of those two entries.
 /// This is used to speed computation of RawGroup::data_len8().
