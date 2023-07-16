@@ -1,8 +1,9 @@
 use crunchy::unroll;
 
 use super::{scalar, CodingDescriptor1234};
-use crate::coding_descriptor::CodingDescriptor;
+use crate::arch::shuffle::decode_shuffle_entry;
 use crate::raw_group::RawGroup;
+use crate::{arch::shuffle::encode_shuffle_entry, coding_descriptor::CodingDescriptor};
 use std::arch::x86_64::{
     __m128i, _mm_add_epi32, _mm_adds_epu16, _mm_alignr_epi8, _mm_bslli_si128, _mm_loadu_si128,
     _mm_min_epi16, _mm_min_epu8, _mm_movemask_epi8, _mm_packus_epi16, _mm_set1_epi16,
@@ -10,10 +11,32 @@ use std::arch::x86_64::{
     _mm_sub_epi32,
 };
 
-const ENCODE_TABLE: [[u8; 16]; 256] =
-    crate::arch::tag_encode_shuffle_table32(RawGroupImpl::TAG_LEN);
-const DECODE_TABLE: [[u8; 16]; 256] =
-    crate::arch::tag_decode_shuffle_table32(RawGroupImpl::TAG_LEN);
+const ENCODE_TABLE: [[u8; 16]; 256] = {
+    let mut table = [[0u8; 16]; 256];
+    let mut tag = 0;
+    while tag < 256 {
+        table[tag] = encode_shuffle_entry::<{ std::mem::size_of::<u32>() }, 16>(
+            tag as u8,
+            CodingDescriptor1234::TAG_LEN,
+            128,
+        );
+        tag += 1;
+    }
+    table
+};
+const DECODE_TABLE: [[u8; 16]; 256] = {
+    let mut table = [[0u8; 16]; 256];
+    let mut tag = 0;
+    while tag < 256 {
+        table[tag] = decode_shuffle_entry::<{ std::mem::size_of::<u32>() }, 16>(
+            tag as u8,
+            CodingDescriptor1234::TAG_LEN,
+            128,
+        );
+        tag += 1;
+    }
+    table
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(__m128i);
