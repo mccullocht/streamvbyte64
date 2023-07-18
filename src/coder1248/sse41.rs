@@ -1,3 +1,5 @@
+use crunchy::unroll;
+
 use super::{scalar, CodingDescriptor1248};
 use crate::arch::shuffle::{decode_shuffle_entry, encode_shuffle_entry};
 use crate::coding_descriptor::CodingDescriptor;
@@ -180,6 +182,23 @@ impl RawGroup for RawGroupImpl {
         let ac_bd = _mm_add_epi64(a_b, c_d);
         let abcd_bd = _mm_add_epi64(_mm_bsrli_si128::<8>(ac_bd), ac_bd);
         (len, std::mem::transmute(_mm_cvtsi128_si64x(abcd_bd)))
+    }
+
+    #[inline]
+    unsafe fn skip_deltas8(input: *const u8, tag8: u64) -> (usize, Self::Elem) {
+        let tags = tag8.to_le_bytes();
+        let (mut offset, group) = Self::decode(input, tags[0]);
+        let mut sum_delta = _mm_add_epi64(group.0, group.1);
+        unroll! {
+            for i in 1..8 {
+                let (len, group) = Self::decode(input.add(offset), tags[i]);
+                offset += len;
+                sum_delta = _mm_add_epi64(sum_delta, group.0);
+                sum_delta = _mm_add_epi64(sum_delta, group.1);
+            }
+        }
+        sum_delta = _mm_add_epi64(sum_delta, _mm_bsrli_si128(sum_delta, 8));
+        (offset, std::mem::transmute(_mm_cvtsi128_si64x(sum_delta)))
     }
 }
 
