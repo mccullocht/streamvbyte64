@@ -1,5 +1,5 @@
-// XXX this should be sse41.rs since that's needed for the encoding instructions.
 use super::{scalar, CodingDescriptor1248};
+use crate::arch::shuffle::{decode_shuffle_entry, encode_shuffle_entry};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::x86_64::{
@@ -9,55 +9,37 @@ use std::arch::x86_64::{
     _mm_shuffle_epi8, _mm_storeu_si128, _mm_sub_epi64,
 };
 
-const fn generate_encode_shuffle_table() -> [[u8; 16]; 16] {
-    let mut table = [[128u8; 16]; 16];
+/// Build a 16 entry encode table processing half of the input group (2 entries).
+/// This is necessary because pshufb can only address 16 bytes of input at a time.
+const ENCODE_TABLE: [[u8; 16]; 16] = {
+    let mut table = [[0u8; 16]; 16];
     let mut tag = 0usize;
     while tag < 16 {
-        let mut shuf_idx = 0;
-        let mut i = 0;
-        while i < 2 {
-            let vtag = (tag >> (i * 2)) & 0x3;
-            let mut j = 0;
-            while j < (1 << vtag) {
-                table[tag][shuf_idx] = (i * 8 + j) as u8;
-                shuf_idx += 1;
-                j += 1;
-            }
-            i += 1;
-        }
+        table[tag] = encode_shuffle_entry::<{ std::mem::size_of::<u64>() }, 16>(
+            tag as u8,
+            CodingDescriptor1248::TAG_LEN,
+            128,
+        );
         tag += 1;
     }
     table
-}
+};
 
-const ENCODE_TABLE: [[u8; 16]; 16] = generate_encode_shuffle_table();
-
-/// Generate a decode shuffle table reading up to 16 bytes of input and 2 output u64s at a time.
-/// This works different from aarch64/NEON as the shuffle instruction does not accept more than
-/// 16 bytes of data as input.
-/// XXX we could probably allow the function to control the number of input tags.
-const fn generate_decode_shuffle_table() -> [[u8; 16]; 16] {
-    let mut table = [[128u8; 16]; 16];
+/// Build a 16 entry decode table processing half of the input group (2 entries).
+/// This is necessary because pshufb can only address 16 bytes of input at a time.
+const DECODE_TABLE: [[u8; 16]; 16] = {
+    let mut table = [[0u8; 16]; 16];
     let mut tag = 0usize;
     while tag < 16 {
-        let mut shuf_idx = 0;
-        let mut i = 0;
-        while i < 2 {
-            let vtag = (tag >> (i * 2)) & 0x3;
-            let mut j = 0;
-            while j < (1 << vtag) {
-                table[tag][i * 8 + j] = shuf_idx;
-                shuf_idx += 1;
-                j += 1;
-            }
-            i += 1;
-        }
+        table[tag] = decode_shuffle_entry::<{ std::mem::size_of::<u64>() }, 16>(
+            tag as u8,
+            CodingDescriptor1248::TAG_LEN,
+            128,
+        );
         tag += 1;
     }
     table
-}
-
-const DECODE_TABLE: [[u8; 16]; 16] = generate_decode_shuffle_table();
+};
 
 // XXX this is a duplicate of another generated table.
 const NIBBLE_LEN: [usize; 16] = [2, 3, 5, 9, 3, 4, 6, 10, 5, 6, 8, 12, 9, 10, 12, 16];
@@ -75,11 +57,9 @@ impl RawGroupImpl {
         let mmask = _mm_set1_epi64x(0x0101010101010100);
         let m = (_mm_min_epu8(self.0, mmask), _mm_min_epu8(self.1, mmask));
         let n1 = _mm_packus_epi16(m.0, m.1);
-        // XXX sse41
         let m1 = _mm_min_epu16(n1, _mm_set1_epi32(0x1_0100));
         // map 0x0100 => 0x8000 for movemask
         let m2 = _mm_add_epi32(m1, _mm_set1_epi32(0x7f00));
-        // XXX this is an sse41 feature
         let n2 = _mm_packus_epi32(m2, m2);
         _mm_movemask_epi8(n2) as u8
     }
