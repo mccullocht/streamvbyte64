@@ -51,7 +51,7 @@ unsafe fn load_shuffle(table: &[[u8; 16]; 16], nibble_tags: (usize, usize)) -> (
     )
 }
 
-// XXX this is a duplicate of another generated table.
+// TODO: this could be shared with generate_nibble_tag_len_table().
 const NIBBLE_LEN: [usize; 16] = [2, 3, 5, 9, 3, 4, 6, 10, 5, 6, 8, 12, 9, 10, 12, 16];
 
 #[derive(Clone, Copy, Debug)]
