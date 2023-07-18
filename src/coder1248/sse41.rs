@@ -41,6 +41,14 @@ const DECODE_TABLE: [[u8; 16]; 16] = {
     table
 };
 
+#[inline(always)]
+unsafe fn load_shuffle(table: &[[u8; 16]; 16], nibble_tags: (usize, usize)) -> (__m128i, __m128i) {
+    (
+        _mm_loadu_si128(table[nibble_tags.0].as_ptr() as *const __m128i),
+        _mm_loadu_si128(table[nibble_tags.1].as_ptr() as *const __m128i),
+    )
+}
+
 // XXX this is a duplicate of another generated table.
 const NIBBLE_LEN: [usize; 16] = [2, 3, 5, 9, 3, 4, 6, 10, 5, 6, 8, 12, 9, 10, 12, 16];
 
@@ -53,7 +61,7 @@ impl RawGroupImpl {
     /// The bit manipulation ensures that we handle cases with bytes 2-4 set correctly, the 32-bit
     /// narrow will ensure that if bytes 5-8 are set we will set all bits in the output tag.
     #[inline(always)]
-    unsafe fn compute_tag(&self) -> u8 {
+    unsafe fn compute_tag(&self) -> usize {
         let mmask = _mm_set1_epi64x(0x0101010101010100);
         let m = (_mm_min_epu8(self.0, mmask), _mm_min_epu8(self.1, mmask));
         let n1 = _mm_packus_epi16(m.0, m.1);
@@ -61,13 +69,20 @@ impl RawGroupImpl {
         // map 0x0100 => 0x8000 for movemask
         let m2 = _mm_add_epi32(m1, _mm_set1_epi32(0x7f00));
         let n2 = _mm_packus_epi32(m2, m2);
-        _mm_movemask_epi8(n2) as u8
+        _mm_movemask_epi8(n2) as usize & 0xff
     }
 
-    /// Produce data length for lo and hi nibbles of the input tag.
+    /// Splits input 8-bit `tag` into two nibble-length tags covering two entries instead of 4.
     #[inline(always)]
-    fn nibble_tag_lens(tag: usize) -> (usize, usize) {
-        (NIBBLE_LEN[tag & 0xf], NIBBLE_LEN[tag >> 4])
+    fn nibble_tags(tag: usize) -> (usize, usize) {
+        debug_assert!(tag < 256);
+        (tag & 0xf, tag >> 4)
+    }
+
+    /// Return the data length for each nibble tag.
+    #[inline(always)]
+    fn nibble_data_len(nibble_tags: (usize, usize)) -> (usize, usize) {
+        (NIBBLE_LEN[nibble_tags.0], NIBBLE_LEN[nibble_tags.1])
     }
 }
 
@@ -99,26 +114,20 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        // XXX given the approach could try avx for this. use a larger table but a single load for
-        // shuffle table but still need to break up into two stores.
         let tag = group.compute_tag();
-        let utag = tag as usize;
-        let half_lens = Self::nibble_tag_lens(utag);
-        let shuf = (
-            _mm_loadu_si128(ENCODE_TABLE[utag & 0xf].as_ptr() as *const __m128i),
-            _mm_loadu_si128(ENCODE_TABLE[utag >> 4].as_ptr() as *const __m128i),
-        );
+        let nibble_tags = Self::nibble_tags(tag);
+        let nibble_data_len = Self::nibble_data_len(nibble_tags);
+        let shuf = load_shuffle(&ENCODE_TABLE, nibble_tags);
         _mm_storeu_si128(output as *mut __m128i, _mm_shuffle_epi8(group.0, shuf.0));
         _mm_storeu_si128(
-            output.add(half_lens.0) as *mut __m128i,
+            output.add(nibble_data_len.0) as *mut __m128i,
             _mm_shuffle_epi8(group.1, shuf.1),
         );
-        (tag, half_lens.0 + half_lens.1)
+        (tag as u8, nibble_data_len.0 + nibble_data_len.1)
     }
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-        // XXX this becomes more difficult in avx but you save on the subtraction.
         let delta_base = (
             _mm_alignr_epi8::<8>(group.0, base.1),
             _mm_alignr_epi8::<8>(group.1, group.0),
@@ -132,17 +141,15 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn decode(input: *const u8, tag: u8) -> (usize, Self) {
-        let half_lens = Self::nibble_tag_lens(tag as usize);
+        let nibble_tags = Self::nibble_tags(tag as usize);
+        let nibble_data_len = Self::nibble_data_len(nibble_tags);
         let inputs = (
             _mm_loadu_si128(input as *const __m128i),
-            _mm_loadu_si128(input.add(half_lens.0) as *const __m128i),
+            _mm_loadu_si128(input.add(nibble_data_len.0) as *const __m128i),
         );
-        let shuf = (
-            _mm_loadu_si128(DECODE_TABLE[tag as usize & 0xf].as_ptr() as *const __m128i),
-            _mm_loadu_si128(DECODE_TABLE[tag as usize >> 4].as_ptr() as *const __m128i),
-        );
+        let shuf = load_shuffle(&DECODE_TABLE, nibble_tags);
         (
-            half_lens.0 + half_lens.1,
+            nibble_data_len.0 + nibble_data_len.1,
             RawGroupImpl(
                 _mm_shuffle_epi8(inputs.0, shuf.0),
                 _mm_shuffle_epi8(inputs.1, shuf.1),
