@@ -1,14 +1,13 @@
-use crunchy::unroll;
-
 use super::{scalar, CodingDescriptor1248};
 use crate::arch::shuffle::{decode_shuffle_entry, encode_shuffle_entry};
 use crate::coding_descriptor::CodingDescriptor;
 use crate::raw_group::RawGroup;
 use std::arch::x86_64::{
-    __m128i, __m256i, _mm256_add_epi32, _mm256_loadu2_m128i, _mm256_loadu_si256, _mm256_min_epu16,
+    __m128i, __m256i, _mm256_add_epi32, _mm256_add_epi64, _mm256_alignr_epi8, _mm256_bslli_epi128,
+    _mm256_bsrli_epi128, _mm256_loadu2_m128i, _mm256_loadu_si256, _mm256_min_epu16,
     _mm256_min_epu8, _mm256_movemask_epi8, _mm256_packus_epi16, _mm256_packus_epi32,
-    _mm256_permute4x64_epi64, _mm256_set1_epi32, _mm256_set1_epi64x, _mm256_shuffle_epi8,
-    _mm256_storeu2_m128i, _mm256_storeu_si256,
+    _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi32, _mm256_set1_epi64x,
+    _mm256_shuffle_epi8, _mm256_storeu2_m128i, _mm256_storeu_si256, _mm256_sub_epi64,
 };
 
 /// Build a 16 entry encode table processing half of the input group (2 entries).
@@ -125,7 +124,13 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode_deltas(output: *mut u8, base: Self, group: Self) -> (u8, usize) {
-        todo!()
+        // Permute to compose vector (base2, base3, group0, group1) to feed to alignr which operates
+        // on 128 bit lanes to produce a base value.
+        let base = _mm256_alignr_epi8::<8>(
+            group.0,
+            _mm256_permute2x128_si256(base.0, group.0, 0b00100001),
+        );
+        Self::encode(output, Self(_mm256_sub_epi64(group.0, base)))
     }
 
     #[inline]
@@ -145,7 +150,12 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn decode_deltas(input: *const u8, tag: u8, base: Self) -> (usize, Self) {
-        todo!()
+        let (len, Self(d_c_b_a)) = Self::decode(input, tag);
+        let delta_base = _mm256_permute4x64_epi64(base.0, 0b11111111);
+        let cd_c_ab_a = _mm256_add_epi64(d_c_b_a, _mm256_bslli_epi128(d_c_b_a, 8));
+        let pcd_pc_pab_pa = _mm256_add_epi64(cd_c_ab_a, delta_base);
+        let ab_ab_z_z = _mm256_permute4x64_epi64(_mm256_bsrli_epi128(cd_c_ab_a, 8), 0b00000101);
+        (len, Self(_mm256_add_epi64(pcd_pc_pab_pa, ab_ab_z_z)))
     }
 
     #[inline]
