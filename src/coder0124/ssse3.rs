@@ -5,17 +5,18 @@ use crate::arch::shuffle::decode_shuffle_entry;
 use crate::raw_group::RawGroup;
 use crate::{arch::shuffle::encode_shuffle_entry, coding_descriptor::CodingDescriptor};
 use std::arch::x86_64::{
-    __m128i, _mm_add_epi32, _mm_adds_epu16, _mm_alignr_epi8, _mm_bslli_si128, _mm_loadu_si128,
-    _mm_min_epi16, _mm_min_epu8, _mm_movemask_epi8, _mm_packus_epi16, _mm_set1_epi16,
-    _mm_set1_epi32, _mm_set1_epi8, _mm_shuffle_epi32, _mm_shuffle_epi8, _mm_storeu_si128,
-    _mm_sub_epi32,
+    __m128i, _mm_add_epi32, _mm_alignr_epi8, _mm_bslli_si128, _mm_loadu_si128, _mm_min_epi16,
+    _mm_min_epu8, _mm_movemask_epi8, _mm_packus_epi32, _mm_set1_epi16, _mm_set1_epi32,
+    _mm_set1_epi8, _mm_shuffle_epi32, _mm_shuffle_epi8, _mm_storeu_si128, _mm_sub_epi32,
 };
 
+const ELEM_LEN: usize = std::mem::size_of::<u32>();
+const GROUP_LEN: usize = ELEM_LEN * 4;
 const ENCODE_TABLE: [[u8; 16]; 256] = {
     let mut table = [[0u8; 16]; 256];
     let mut tag = 0;
     while tag < 256 {
-        table[tag] = encode_shuffle_entry::<{ std::mem::size_of::<u32>() }, 16>(
+        table[tag] = encode_shuffle_entry::<ELEM_LEN, GROUP_LEN>(
             tag as u8,
             CodingDescriptor0124::TAG_LEN,
             128,
@@ -28,7 +29,7 @@ const DECODE_TABLE: [[u8; 16]; 256] = {
     let mut table = [[0u8; 16]; 256];
     let mut tag = 0;
     while tag < 256 {
-        table[tag] = decode_shuffle_entry::<{ std::mem::size_of::<u32>() }, 16>(
+        table[tag] = decode_shuffle_entry::<ELEM_LEN, GROUP_LEN>(
             tag as u8,
             CodingDescriptor0124::TAG_LEN,
             128,
@@ -40,6 +41,21 @@ const DECODE_TABLE: [[u8; 16]; 256] = {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RawGroupImpl(__m128i);
+
+impl RawGroupImpl {
+    // XXX this needs to be sse4.1 due to _mm_packus_epi32
+    unsafe fn compute_tag(&self) -> u8 {
+        // fill each set byte with 0x01.
+        let a = _mm_min_epu8(self.0, _mm_set1_epi8(1));
+        // transform 0x0101 => 0x0100. This is important in the low half word to handle tag=2.
+        let b = _mm_min_epi16(a, _mm_set1_epi16(0x0100));
+        // add to low half work to set hi bit in each byte if lowest bit is set.
+        let c = _mm_add_epi32(b, _mm_set1_epi32(0x7f7f));
+        // saturating pack to produce a value that can movemask to produce the tag.
+        let d = _mm_packus_epi32(c, c);
+        _mm_movemask_epi8(d) as u8
+    }
+}
 
 impl RawGroup for RawGroupImpl {
     type Elem = u32;
@@ -62,15 +78,7 @@ impl RawGroup for RawGroupImpl {
 
     #[inline]
     unsafe fn encode(output: *mut u8, group: Self) -> (u8, usize) {
-        // This implementation for generating the tag byte came from https://github.com/lemire/streamvbyte/blob/08c60644dc6956182c68c1b453ba5f2d42367823/src/streamvbytedelta_x64_encode.c
-        let mask_01 = _mm_set1_epi8(0x1);
-        let mask_7f00 = _mm_set1_epi16(0x7f00);
-
-        let a = _mm_min_epu8(mask_01, group.0);
-        let b = _mm_packus_epi16(a, a);
-        let c = _mm_min_epi16(b, mask_01);
-        let d = _mm_adds_epu16(c, mask_7f00);
-        let tag = _mm_movemask_epi8(d) as u8;
+        let tag = group.compute_tag();
 
         _mm_storeu_si128(
             output as *mut __m128i,
@@ -141,16 +149,6 @@ impl RawGroup for RawGroupImpl {
         let mut d = [0u32; 4];
         _mm_storeu_si128(d.as_mut_ptr() as *mut __m128i, delta_sum.0);
         (offset, d.into_iter().fold(0, |s, d| s.wrapping_add(d)))
-    }
-
-    #[inline]
-    fn data_len8(tag8: u64) -> usize {
-        let sum4 = ((tag8 >> 2) & 0x3333333333333333) + (tag8 & 0x3333333333333333);
-        let sum8 = ((sum4 >> 4) & 0x0f0f0f0f0f0f0f0f) + (sum4 & 0x0f0f0f0f0f0f0f0f);
-        let sum16 = ((sum8 >> 8) & 0x00ff00ff00ff00ff) + (sum8 & 0x00ff00ff00ff00ff);
-        let sum32 = ((sum16 >> 16) & 0x0000ffff0000ffff) + (sum16 & 0x0000ffff0000ffff);
-        let sum64 = ((sum32 >> 32) & 0xffffffff) + (sum32 & 0xffffffff);
-        sum64 as usize + 32
     }
 }
 
