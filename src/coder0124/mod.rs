@@ -1,5 +1,7 @@
 #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
 mod neon;
+#[cfg(target_arch = "x86_64")]
+mod sse41;
 
 use crate::coding_descriptor::CodingDescriptor;
 use crate::{coder_impl, Coder};
@@ -42,6 +44,8 @@ enum Impl {
     Scalar,
     #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
     Neon,
+    #[cfg(target_arch = "x86_64")]
+    SSE41,
 }
 
 /// `Coder0124` packs 32-bit integers into lengths of 0, 1, 2, or 4 bytes.
@@ -60,6 +64,16 @@ impl Coder for Coder0124 {
                 return Coder0124(Impl::Neon);
             }
         }
+        #[cfg(all(
+            target_arch = "x86_64",
+            target_feature = "ssse3",
+            target_feature = "sse4.1"
+        ))]
+        {
+            if is_x86_feature_detected!("ssse3") && is_x86_feature_detected!("sse4.1") {
+                return Coder0124(Impl::SSE41);
+            }
+        }
         Coder0124(Impl::Scalar)
     }
 
@@ -68,6 +82,8 @@ impl Coder for Coder0124 {
             Impl::Scalar => coder_impl::encode::<scalar::RawGroupImpl>(values, tags, encoded),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::encode::<neon::RawGroupImpl>(values, tags, encoded),
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => coder_impl::encode::<sse41::RawGroupImpl>(values, tags, encoded),
         }
     }
 
@@ -86,6 +102,10 @@ impl Coder for Coder0124 {
             Impl::Neon => {
                 coder_impl::encode_deltas::<neon::RawGroupImpl>(initial, values, tags, encoded)
             }
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => {
+                coder_impl::encode_deltas::<sse41::RawGroupImpl>(initial, values, tags, encoded)
+            }
         }
     }
 
@@ -94,6 +114,8 @@ impl Coder for Coder0124 {
             Impl::Scalar => coder_impl::decode::<scalar::RawGroupImpl>(tags, encoded, values),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::decode::<neon::RawGroupImpl>(tags, encoded, values),
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => coder_impl::decode::<sse41::RawGroupImpl>(tags, encoded, values),
         }
     }
 
@@ -112,6 +134,10 @@ impl Coder for Coder0124 {
             Impl::Neon => {
                 coder_impl::decode_deltas::<neon::RawGroupImpl>(initial, tags, encoded, values)
             }
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => {
+                coder_impl::decode_deltas::<sse41::RawGroupImpl>(initial, tags, encoded, values)
+            }
         }
     }
 
@@ -120,6 +146,8 @@ impl Coder for Coder0124 {
             Impl::Scalar => coder_impl::data_len::<scalar::RawGroupImpl>(tags),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::data_len::<neon::RawGroupImpl>(tags),
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => coder_impl::data_len::<sse41::RawGroupImpl>(tags),
         }
     }
 
@@ -128,6 +156,8 @@ impl Coder for Coder0124 {
             Impl::Scalar => coder_impl::skip_deltas::<scalar::RawGroupImpl>(tags, encoded),
             #[cfg(all(target_arch = "aarch64", target_endian = "little"))]
             Impl::Neon => coder_impl::skip_deltas::<neon::RawGroupImpl>(tags, encoded),
+            #[cfg(target_arch = "x86_64")]
+            Impl::SSE41 => coder_impl::skip_deltas::<sse41::RawGroupImpl>(tags, encoded),
         }
     }
 }
