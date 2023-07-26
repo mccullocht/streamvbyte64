@@ -1,6 +1,6 @@
 [package]
 name = "streamvbyte64"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 authors = ["Trevor McCulloch <mccullocht@gmail.com>"]
 description = "Implementation of stream-vbyte codec supporting 64-bit wide values"
@@ -13,7 +13,7 @@ crunchy = "0.2.2"
 num-traits = "0.2.15"
 
 [dev-dependencies]
-criterion = "0.3.6"
+criterion = "0.5.1"
 rand = "0.8.5"
 
 [[bench]]

@@ -11,8 +11,7 @@ the implementation will automatically use an accelerated implementation for the 
 
 A scalar implementation is available for all `Coder`s but this is typically pretty slow. All
 implementations also include acceleration when building for little-endian `aarch64` with `NEON`
-instruction support, although it should be easy to extend to `x86_64` in the future (contributions
-are welcome).)
+instruction support and `x86_64` using the `SSSE3` or `SSE4.1` instruction sets.
 
 `Coder1234` will typically be fastest, but other tag length distributions (including `Coder1248` for
 64-bit values) are available.)
